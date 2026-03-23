@@ -221,7 +221,6 @@ const Cleaner = (() => {
     removeEmptyRows,
     removeEmptyColumns,
     removeDuplicateRows,
-    removeAbsoluteDuplicates,
     fixNumberFormatting,
     normalizeHeaders,
     getStats,

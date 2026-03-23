@@ -1,8 +1,3 @@
-// Polyfill TextDecoder/TextEncoder for jest-environment-jsdom (not included by default)
-const { TextDecoder, TextEncoder } = require('util');
-global.TextDecoder = global.TextDecoder || TextDecoder;
-global.TextEncoder = global.TextEncoder || TextEncoder;
-
 // Chrome Extension API mocks
 global.chrome = {
   sidePanel: {
@@ -59,10 +54,6 @@ global.FileReader = class MockFileReader {
 
   readAsText(blob) {
     Promise.resolve().then(() => {
-      if (blob._error) {
-        if (this.onerror) this.onerror(new Error(blob._error));
-        return;
-      }
       this.result = blob._content !== undefined ? blob._content : '';
       if (this.onload) this.onload();
     });
@@ -70,10 +61,6 @@ global.FileReader = class MockFileReader {
 
   readAsArrayBuffer(blob) {
     Promise.resolve().then(() => {
-      if (blob._error) {
-        if (this.onerror) this.onerror(new Error(blob._error));
-        return;
-      }
       this.result = blob._buffer !== undefined ? blob._buffer : new ArrayBuffer(0);
       if (this.onload) this.onload();
     });

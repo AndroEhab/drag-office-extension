@@ -1,12 +1,16 @@
-const { loadModule } = require('./helpers');
+const fs = require('fs');
+const path = require('path');
 
-const Parser = loadModule('../sidepanel/parser.js', 'Parser');
+// Load Parser module
+let parserCode = fs.readFileSync(path.resolve(__dirname, '../sidepanel/parser.js'), 'utf-8');
+parserCode = parserCode.replace('const Parser =', 'global.Parser =');
+eval(parserCode);
+const Parser = global.Parser;
 
-/** Create a File with _content and _buffer attached for the MockFileReader */
+/** Create a File with _content attached for the MockFileReader */
 function makeFile(name, textContent) {
   const file = new File([textContent], name);
   file._content = textContent;
-  file._buffer = new TextEncoder().encode(textContent).buffer;
   return file;
 }
 

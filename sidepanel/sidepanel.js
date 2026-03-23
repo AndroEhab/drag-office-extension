@@ -935,8 +935,6 @@
       this.urlToggle.setAttribute('aria-expanded', String(open));
       if (open) {
         this.urlInput.focus();
-      } else {
-        this.currentFetchController?.abort();
       }
     }
 
@@ -961,12 +959,8 @@
       this.urlFetchBtn.disabled = true;
       this.setStatus(`Fetching ${url.hostname}…`, 'loading');
 
-      const controller = new AbortController();
-      this.currentFetchController = controller;
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
       try {
-        const response = await fetch(url.toString(), { signal: controller.signal });
+        const response = await fetch(url.toString());
 
         if (!response.ok) {
           throw new Error(`Server returned ${response.status} ${response.statusText}`);
@@ -998,14 +992,8 @@
         this.toggleUrlBar(false);
       } catch (err) {
         this.urlInput.classList.add('url-input--error');
-        if (err.name === 'AbortError') {
-          this.setStatus('Import cancelled or timed out', 'error');
-        } else {
-          this.setStatus(`Import failed: ${err.message}`, 'error');
-        }
+        this.setStatus(`Import failed: ${err.message}`, 'error');
       } finally {
-        clearTimeout(timeoutId);
-        this.currentFetchController = null;
         this.urlFetchBtn.disabled = false;
       }
     }
@@ -1462,7 +1450,7 @@
     clearFiles() {
       this.files = [];
       this.fileFingerprints.clear();
-      this.fileIdentityKeys.clear();
+       this.fileIdentityKeys.clear();
       this.customMappings = [];
       this.markFilesChanged();
       this.renderFileList();

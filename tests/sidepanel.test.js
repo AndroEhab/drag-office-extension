@@ -59,16 +59,12 @@ global.lucide = {
 
 let spCode = fs.readFileSync(path.resolve(__dirname, '../sidepanel/sidepanel.js'), 'utf-8');
 spCode = spCode.replace(
-  /document\.addEventListener\(\s*['"]DOMContentLoaded['"]\s*,\s*\(\)\s*=>\s*new\s+DragToSheetsApp\(\)\s*\)\s*;?/,
+  "document.addEventListener('DOMContentLoaded', () => new DragToSheetsApp());",
   'global.DragToSheetsApp = DragToSheetsApp;'
 );
 eval(spCode);
 
-if (typeof global.DragToSheetsApp !== 'function') {
-  throw new Error('Failed to expose DragToSheetsApp — the source pattern may have changed');
-}
-
-// ---- DOM setup (must mirror sidepanel.html — see sidepanel/sidepanel.html) ----
+// ---- DOM setup ----
 
 function setupDOM() {
   window.lucide = global.lucide;

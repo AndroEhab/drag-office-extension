@@ -82,14 +82,14 @@ npm run setup
 
 ### Option B: Manual download
 
-1. Download `xlsx.full.min.js` from [SheetJS CDN](https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js)
-2. Place it in `lib/xlsx.full.min.js`
+1. Download `xlsx.mini.min.js` from [SheetJS CDN](https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.mini.min.js)
+2. Place it in `lib/xlsx.mini.min.js`
 
 ---
 
 ## Project Structure
 
-```text
+```
 drag-office-extension/
 ├── manifest.json          # Manifest V3 configuration
 ├── background.js          # Service worker (panel open + shortcuts)
@@ -102,7 +102,7 @@ drag-office-extension/
 │   ├── merger.js          # Multi-file merge logic
 │   └── google-api.js      # Sheets & Drive API wrapper
 ├── lib/                   # Third-party libraries (SheetJS)
-│   └── xlsx.full.min.js   # (install via npm or manual download)
+│   └── xlsx.mini.min.js   # (install via npm or manual download)
 ├── package.json           # npm config (for SheetJS setup)
 └── README.md
 ```

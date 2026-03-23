@@ -1,6 +1,11 @@
-const { loadModule } = require('./helpers');
+const fs = require('fs');
+const path = require('path');
 
-const Cleaner = loadModule('../sidepanel/cleaner.js', 'Cleaner');
+// Load Cleaner module
+let cleanerCode = fs.readFileSync(path.resolve(__dirname, '../sidepanel/cleaner.js'), 'utf-8');
+cleanerCode = cleanerCode.replace('const Cleaner =', 'global.Cleaner =');
+eval(cleanerCode);
+const Cleaner = global.Cleaner;
 
 describe('Cleaner', () => {
   // ---- trimWhitespace ----
