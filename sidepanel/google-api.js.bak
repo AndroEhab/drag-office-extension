@@ -1,0 +1,287 @@
+/**
+ * Google Sheets & Drive API wrapper.
+ * Uses chrome.identity for OAuth 2.0 authentication.
+ */
+
+// eslint-disable-next-line no-unused-vars
+const GoogleAPI = (() => {
+  'use strict';
+
+  const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+
+  // ---- Auth ----
+
+  async function getToken() {
+    const result = await chrome.identity.getAuthToken({ interactive: true });
+    // Chrome 131+ returns { token, grantedScopes }, older returns object too
+    return result.token;
+  }
+
+  async function revokeToken() {
+    try {
+      const result = await chrome.identity.getAuthToken({ interactive: false });
+      const token = result.token;
+      if (token) {
+        await chrome.identity.removeCachedAuthToken({ token });
+        await fetch(
+          `https://accounts.google.com/o/oauth2/revoke?token=${encodeURIComponent(token)}`
+        );
+      }
+    } catch (_) {
+      // No cached token — nothing to revoke
+    }
+  }
+
+  // ---- HTTP helpers ----
+
+  async function apiRequest(url, options = {}) {
+    const token = await getToken();
+
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const body = await response.json();
+        detail = body.error?.message || JSON.stringify(body);
+      } catch (_) {
+        detail = response.statusText;
+      }
+      throw new Error(`Google API ${response.status}: ${detail}`);
+    }
+
+    return response.json();
+  }
+
+  // ---- Sheet name helpers ----
+
+  function sanitizeSheetName(name) {
+    let safe = String(name || 'Sheet')
+      .replace(/[\\/?*[\]]/g, '_') // Remove invalid chars
+      .replace(/^'+|'+$/g, '')     // No leading/trailing apostrophes
+      .trim();
+    return safe.substring(0, 100) || 'Sheet';
+  }
+
+  function escapeSheetName(name) {
+    // Wrap in single quotes; escape embedded single quotes
+    return "'" + name.replace(/'/g, "''") + "'";
+  }
+
+  // ---- Formatting helpers ----
+
+  /**
+   * Convert an Excel ARGB or RGB hex string to a Sheets API RGB color object.
+   * Excel uses ARGB (8 chars, first 2 are alpha) or RGB (6 chars).
+   */
+  function hexToRgb(hex) {
+    if (!hex || hex.length < 6) return null;
+    const offset = hex.length === 8 ? 2 : 0; // skip alpha channel in ARGB
+    const r = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    const g = parseInt(hex.slice(offset + 2, offset + 4), 16) / 255;
+    const b = parseInt(hex.slice(offset + 4, offset + 6), 16) / 255;
+    return Number.isNaN(r) ? null : { red: r, green: g, blue: b };
+  }
+
+  /**
+   * Convert our internal style object to a Sheets API userEnteredFormat.
+   * Returns null when there is nothing to apply.
+   */
+  function styleToSheetsFormat(style) {
+    if (!style) return null;
+    const fmt = {};
+    const textFormat = {};
+    if (style.bold) textFormat.bold = true;
+    if (style.italic) textFormat.italic = true;
+    if (style.fontSize) textFormat.fontSize = style.fontSize;
+    if (style.textColor) {
+      const rgb = hexToRgb(style.textColor);
+      if (rgb) textFormat.foregroundColor = rgb;
+    }
+    if (Object.keys(textFormat).length > 0) fmt.textFormat = textFormat;
+    if (style.bgColor) {
+      const rgb = hexToRgb(style.bgColor);
+      if (rgb) fmt.backgroundColor = rgb;
+    }
+    return Object.keys(fmt).length > 0 ? fmt : null;
+  }
+
+  // ---- Public API ----
+
+  /**
+   * Create a new Google Spreadsheet and populate it with data.
+   *
+   * @param {string} title - Spreadsheet title
+   * @param {Array<{ name: string, data: (string|number)[][] }>} sheetsData
+   * @returns {Promise<{ id: string, url: string }>}
+   */
+  async function createSpreadsheet(title, sheetsData, options = {}) {
+    const { preserveFormatting = false } = options;
+    // Sanitize sheet names and ensure uniqueness
+    const usedNames = new Set();
+    const sanitized = sheetsData.map((sheet) => {
+      let name = sanitizeSheetName(sheet.name);
+      let suffix = 1;
+      const base = name;
+      while (usedNames.has(name)) {
+        name = `${base} (${suffix++})`;
+      }
+      usedNames.add(name);
+      return { ...sheet, name };
+    });
+
+    // Step 1: Create the spreadsheet with sheet definitions
+    const spreadsheet = await apiRequest(SHEETS_BASE, {
+      method: 'POST',
+      body: JSON.stringify({
+        properties: { title },
+        sheets: sanitized.map((sheet) => ({
+          properties: {
+            title: sheet.name,
+            gridProperties: {
+              rowCount: Math.max(sheet.data.length, 1),
+              columnCount: Math.max(
+                ...sheet.data.map((r) => r.length),
+                1
+              ),
+            },
+          },
+        })),
+      }),
+    });
+
+    const spreadsheetId = spreadsheet.spreadsheetId;
+
+    // Step 2: Batch-write values into each sheet
+    const valueRanges = sanitized
+      .filter((sheet) => sheet.data.length > 0)
+      .map((sheet) => ({
+        range: `${escapeSheetName(sheet.name)}!A1`,
+        values: sheet.data.map((row) => row.map((cell) => cell ?? '')),
+      }));
+
+    if (valueRanges.length > 0) {
+      await apiRequest(`${SHEETS_BASE}/${spreadsheetId}/values:batchUpdate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          valueInputOption: 'USER_ENTERED',
+          data: valueRanges,
+        }),
+      });
+    }
+
+    // Step 3: Format — freeze header row + auto-resize columns (always),
+    //         then either apply original cell styles or our default bold header.
+    const formatRequests = [];
+
+    for (const gsSheet of spreadsheet.sheets) {
+      const sheetId = gsSheet.properties.sheetId;
+      const sheetTitle = gsSheet.properties.title;
+      const matchingData = sanitized.find((s) => s.name === sheetTitle);
+      const colCount = matchingData
+        ? Math.max(...matchingData.data.map((r) => r.length), 1)
+        : 1;
+
+      // Freeze first row (always)
+      formatRequests.push({
+        updateSheetProperties: {
+          properties: {
+            sheetId,
+            gridProperties: { frozenRowCount: 1 },
+          },
+          fields: 'gridProperties.frozenRowCount',
+        },
+      });
+
+      if (preserveFormatting && matchingData?.styles) {
+        // Apply original cell styles from the source file
+        const styleRows = matchingData.styles.slice(0, matchingData.data.length);
+        const rowsPayload = styleRows.map((styleRow) => ({
+          values: styleRow.slice(0, colCount).map((style) => {
+            const fmt = styleToSheetsFormat(style);
+            return fmt ? { userEnteredFormat: fmt } : {};
+          }),
+        }));
+        const hasAnyFormat = rowsPayload.some((row) =>
+          row.values.some((v) => Object.keys(v).length > 0)
+        );
+        if (hasAnyFormat) {
+          formatRequests.push({
+            updateCells: {
+              rows: rowsPayload,
+              // List only the format sub-fields we actually set so we don’t
+              // wipe number formats or other properties we haven’t touched.
+              fields: 'userEnteredFormat.textFormat,userEnteredFormat.backgroundColor',
+              range: {
+                sheetId,
+                startRowIndex: 0,
+                endRowIndex: styleRows.length,
+                startColumnIndex: 0,
+                endColumnIndex: colCount,
+              },
+            },
+          });
+        }
+      } else {
+        // Default: bold first row with a light header background
+        formatRequests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: 1,
+              startColumnIndex: 0,
+              endColumnIndex: colCount,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                backgroundColor: { red: 0.937, green: 0.945, blue: 0.957 },
+              },
+            },
+            fields: 'userEnteredFormat(textFormat,backgroundColor)',
+          },
+        });
+      }
+
+      // Auto-resize columns (always)
+      formatRequests.push({
+        autoResizeDimensions: {
+          dimensions: {
+            sheetId,
+            dimension: 'COLUMNS',
+            startIndex: 0,
+            endIndex: colCount,
+          },
+        },
+      });
+    }
+
+    if (formatRequests.length > 0) {
+      await apiRequest(`${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, {
+        method: 'POST',
+        body: JSON.stringify({ requests: formatRequests }),
+      }).catch((err) => {
+        console.warn('Drag to Sheets: formatting batchUpdate failed:', err.message);
+      });
+    }
+
+    return {
+      id: spreadsheetId,
+      url: spreadsheet.spreadsheetUrl,
+    };
+  }
+
+  return {
+    getToken,
+    revokeToken,
+    createSpreadsheet,
+  };
+})();

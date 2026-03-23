@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Drag to Sheets",
+  "version": "1.0.0",
+  "description": "Drag spreadsheet files to open and clean them in Google Sheets",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "sidePanel",
+    "identity",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Open Drag to Sheets"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Open Drag to Sheets panel"
+    }
+  },
+  "oauth2": {
+    "client_id": "1085463726022-ngt9nb7ln0jn7ju53psgtf2jo02hj00g.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive.file"
+    ]
+  }
+}

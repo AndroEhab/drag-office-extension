@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drag to Sheets</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 style="font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif; font-weight: 700;">
+        Sheetz
+      </h1>
+      <span class="badge">beta</span>
+    </header>
+
+    <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Drop area for spreadsheet files">
+      <div class="drop-zone-content">
+        <div class="drop-icon">
+          <i data-lucide="file-up" class="app-icon app-icon--drop" aria-hidden="true"></i>
+        </div>
+        <p class="drop-text">Drop spreadsheet files here</p>
+        <p class="drop-hint">.csv &nbsp; .tsv &nbsp; .xlsx &nbsp; .xls</p>
+      </div>
+      <input type="file" id="file-input" accept=".csv,.tsv,.xlsx,.xls" multiple hidden>
+    </div>
+
+    <div class="url-import">
+      <button id="url-toggle" class="url-toggle" aria-expanded="false">
+        <i data-lucide="link" class="app-icon app-icon--url" aria-hidden="true"></i>
+        Import from URL
+      </button>
+      <div id="url-bar" class="url-bar hidden">
+        <input
+          id="url-input"
+          type="url"
+          class="url-input"
+          placeholder="https://example.com/data.csv"
+          aria-label="File URL"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <button id="url-fetch-btn" class="url-fetch-btn">
+          Import
+        </button>
+      </div>
+    </div>
+
+    <section class="files-section">
+      <div class="files-header">
+        <h2>Files <span id="file-count"></span></h2>
+        <button id="clear-btn" class="btn-text" disabled>Clear all</button>
+      </div>
+      <ul id="file-list" class="file-list"></ul>
+    </section>
+
+    <section id="options-panel" class="options-panel">
+      <div id="merge-option" class="option-group hidden">
+        <h3>Open Mode</h3>
+        <label class="radio-label">
+          <input type="radio" name="open-mode" value="separate" checked>
+          <span>Open separately</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="open-mode" value="merge">
+          <span>Merge into one spreadsheet</span>
+        </label>
+        <div id="smart-mapping-option" class="smart-mapping-option hidden">
+          <label class="checkbox-label">
+            <input type="checkbox" id="opt-smart-mapping">
+            <span>header mapping</span>
+          </label>
+        </div>
+        <div id="custom-mapping-option" class="custom-mapping-option hidden">
+          <span class="custom-mapping-title">Map columns to master file</span>
+          <div id="custom-mapping-list" class="custom-mapping-list"></div>
+          <button id="custom-mapping-add" class="btn-text custom-mapping-add-btn">+ Add mapping</button>
+        </div>
+      </div>
+
+      <div id="mapping-review" class="mapping-review hidden">
+        <div class="mapping-review-header">
+          <h4>Detected Header Mappings</h4>
+          <p class="mapping-review-hint">These headers will be combined into single columns:</p>
+        </div>
+        <div id="mapping-review-list" class="mapping-review-list"></div>
+        <div class="mapping-review-actions">
+          <button id="mapping-approve-btn" class="btn btn-primary btn-sm">Apply Mappings</button>
+          <button id="mapping-decline-btn" class="btn-text">Decline</button>
+        </div>
+      </div>
+
+      <div id="cleaning-options" class="option-group hidden">
+        <h3>Cleaning Options</h3>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-trim">
+          <span>Trim whitespace</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-empty-rows">
+          <span>Remove empty rows</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-empty-cols">
+          <span>Remove empty columns</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-duplicates">
+          <span>Remove duplicate rows</span>
+        </label>
+        <div id="dup-mode" class="dup-mode hidden">
+          <label class="radio-label radio-sub">
+            <input type="radio" name="dup-mode" value="keep-first" checked>
+            <span>Keep first occurrence</span>
+          </label>
+          <label class="radio-label radio-sub">
+            <input type="radio" name="dup-mode" value="absolute">
+            <span>Remove all instances</span>
+          </label>
+        </div>
+        <div class="help-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="opt-numbers">
+            <span>Fix number formatting</span>
+          </label>
+        </div>
+        <div class="help-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="opt-headers">
+            <span>Normalize header names</span>
+          </label>
+        </div>
+        <div class="option-divider"></div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-preserve-fmt">
+          <span>Preserve cell formatting <span class="opt-note">(Excel only)</span></span>
+        </label>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="upload-btn" class="btn btn-primary" disabled>
+        <span class="btn-icon">
+          <i data-lucide="square-arrow-out-up-right" class="app-icon app-icon--button" aria-hidden="true"></i>
+        </span>
+        Open in Sheets
+      </button>
+      <button id="settings-btn" class="btn-settings" title="Cleaning options" aria-pressed="false" aria-label="Toggle cleaning options">
+        <i data-lucide="settings-2" class="app-icon app-icon--settings" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <section id="preview-panel" class="preview-panel hidden">
+      <div class="preview-header">
+        <div class="preview-header-left">
+          <h3>Preview</h3>
+          <div class="preview-select-wrapper">
+            <select id="preview-select" class="preview-select" disabled aria-label="Select file to preview"></select>
+          </div>
+        </div>
+        <span id="preview-stats" class="preview-stats"></span>
+      </div>
+      <div id="preview-table" class="preview-table-wrapper"></div>
+    </section>
+
+    <div id="loading-panel" class="loading-panel">
+      <div class="loading-panel-progress">
+        <div id="loading-panel-bar" class="loading-panel-bar"></div>
+      </div>
+      <div class="loading-panel-body">
+        <div id="loading-spinner" class="loading-spinner hidden"></div>
+        <span id="loading-text" class="loading-text">Press <kbd>Ctrl+Shift+S</kbd> to open &middot; Drop files to start</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SheetJS full build (required for Excel support + cell formatting preservation) -->
+  <script src="../lib/xlsx.full.min.js"></script>
+  <script src="../node_modules/lucide/dist/umd/lucide.js"></script>
+  <script src="parser.js"></script>
+  <script src="cleaner.js"></script>
+  <script src="merger.js"></script>
+  <script src="google-api.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
