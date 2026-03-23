@@ -8,13 +8,6 @@ const Merger = (() => {
   'use strict';
 
   /**
-   * Check if a row is completely empty (all cells blank/whitespace).
-   */
-  function isEmptyRow(row) {
-    return row.every((c) => String(c ?? '').trim() === '');
-  }
-
-  /**
    * Merge multiple parsed file objects into a single dataset.
    * Uses the first sheet from each file.
    * Empty rows are preserved in the merged output (use Cleaner to strip them).

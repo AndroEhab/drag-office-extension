@@ -15,16 +15,7 @@
  * Duration targets are calibrated for a typical development machine.
  * CI environments may need ~2x the thresholds.
  */
-const fs = require('fs');
-const path = require('path');
-
-// ---- Load modules ----
-function loadModule(filePath, globalName) {
-  let code = fs.readFileSync(path.resolve(__dirname, filePath), 'utf-8');
-  code = code.replace(`const ${globalName} =`, `global.${globalName} =`);
-  eval(code);
-  return global[globalName];
-}
+const { loadModule } = require('./helpers');
 
 const Cleaner = loadModule('../sidepanel/cleaner.js', 'Cleaner');
 const Merger = loadModule('../sidepanel/merger.js', 'Merger');
@@ -128,6 +119,7 @@ function makeCsvFile(name, data) {
   const content = toCsv(data);
   const file = new File([content], name);
   file._content = content;
+  file._buffer = new TextEncoder().encode(content).buffer;
   return file;
 }
 

@@ -45,16 +45,21 @@ describe('Background service worker', () => {
   });
 
   test('logs perf messages when worker debug flag is enabled', () => {
+    const originalDebug = console.debug;
     console.debug = jest.fn();
     self.DRAG_TO_SHEETS_DEBUG_PERF = true;
 
-    messageListener({
-      type: 'drag-to-sheets:perf-log',
-      message: 'Drag to Sheets perf: test',
-      details: { rows: 10 },
-    });
+    try {
+      messageListener({
+        type: 'drag-to-sheets:perf-log',
+        message: 'Drag to Sheets perf: test',
+        details: { rows: 10 },
+      });
 
-    expect(console.debug).toHaveBeenCalledWith('Drag to Sheets perf: test', { rows: 10 });
-    self.DRAG_TO_SHEETS_DEBUG_PERF = false;
+      expect(console.debug).toHaveBeenCalledWith('Drag to Sheets perf: test', { rows: 10 });
+    } finally {
+      self.DRAG_TO_SHEETS_DEBUG_PERF = false;
+      console.debug = originalDebug;
+    }
   });
 });
