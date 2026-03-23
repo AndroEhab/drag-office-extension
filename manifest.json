@@ -10,7 +10,11 @@
     "storage"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://sheets.googleapis.com/*",
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "action": {
     "default_title": "Open Drag to Sheets"

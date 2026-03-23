@@ -1,11 +1,6 @@
-const fs = require('fs');
-const path = require('path');
+const { loadModule } = require('./helpers');
 
-// Load GoogleAPI module
-let apiCode = fs.readFileSync(path.resolve(__dirname, '../sidepanel/google-api.js'), 'utf-8');
-apiCode = apiCode.replace('const GoogleAPI =', 'global.GoogleAPI =');
-eval(apiCode);
-const GoogleAPI = global.GoogleAPI;
+const GoogleAPI = loadModule('../sidepanel/google-api.js', 'GoogleAPI');
 
 describe('GoogleAPI', () => {
   beforeEach(() => {

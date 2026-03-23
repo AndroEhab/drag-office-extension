@@ -1,11 +1,6 @@
-const fs = require('fs');
-const path = require('path');
+const { loadModule } = require('./helpers');
 
-// Load Merger module
-let mergerCode = fs.readFileSync(path.resolve(__dirname, '../sidepanel/merger.js'), 'utf-8');
-mergerCode = mergerCode.replace('const Merger =', 'global.Merger =');
-eval(mergerCode);
-const Merger = global.Merger;
+const Merger = loadModule('../sidepanel/merger.js', 'Merger');
 
 /** Helper to wrap data in the parsedFiles format that Merger.merge expects */
 function makeParsedFile(headers, ...rows) {

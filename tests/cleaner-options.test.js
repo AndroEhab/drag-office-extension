@@ -3,14 +3,9 @@
  * Each option is tested in isolation and in combination with others
  * to ensure correct behavior and no unintended side effects.
  */
-const fs = require('fs');
-const path = require('path');
+const { loadModule } = require('./helpers');
 
-// Load Cleaner module
-let cleanerCode = fs.readFileSync(path.resolve(__dirname, '../sidepanel/cleaner.js'), 'utf-8');
-cleanerCode = cleanerCode.replace('const Cleaner =', 'global.Cleaner =');
-eval(cleanerCode);
-const Cleaner = global.Cleaner;
+const Cleaner = loadModule('../sidepanel/cleaner.js', 'Cleaner');
 
 /** Base options object with all cleaning off */
 const ALL_OFF = {

@@ -108,6 +108,11 @@ const Parser = (() => {
 
   /**
    * Auto-detect CSV delimiter from first few lines.
+   *
+   * Priority: tabs > semicolons > commas (default).
+   * Uses a 4096-byte sample for efficiency — large enough for reliable
+   * detection without scanning the entire file. Adjust the sample size
+   * if detection accuracy is insufficient for edge-case files.
    */
   function detectDelimiter(text) {
     const sample = text.substring(0, 4096);
@@ -258,29 +263,40 @@ const Parser = (() => {
     let hasEntries = false;
     const regex = /<c\b[^>]*>/g;
     let match;
-    while ((match = regex.exec(xml)) !== null) {
-      const tag = match[0];
-      const rMatch = tag.match(/\br="([^"]+)"/);
-      const sMatch = tag.match(/\bs="(\d+)"/);
-      if (rMatch) {
-        // Inline decode: "AB12" → col=27, row=11 (0-indexed)
-        const addr = rMatch[1];
-        let col = 0, ri = 0;
-        while (ri < addr.length && addr.charCodeAt(ri) >= 65) {
-          col = col * 26 + (addr.charCodeAt(ri) - 64);
-          ri++;
+    try {
+      while ((match = regex.exec(xml)) !== null) {
+        const tag = match[0];
+        const rMatch = tag.match(/\br="([^"]+)"/);
+        const sMatch = tag.match(/\bs="(\d+)"/);
+        if (!rMatch || !rMatch[1]) continue;
+        try {
+          // Inline decode: "AB12" → col=27, row=11 (0-indexed)
+          const addr = rMatch[1];
+          let col = 0, ri = 0;
+          while (ri < addr.length && addr.charCodeAt(ri) >= 65) {
+            col = col * 26 + (addr.charCodeAt(ri) - 64);
+            ri++;
+          }
+          col--;
+          let row = 0;
+          while (ri < addr.length) {
+            row = row * 10 + (addr.charCodeAt(ri) - 48);
+            ri++;
+          }
+          row--;
+          if (col < 0 || row < 0 || !isFinite(col) || !isFinite(row)) continue;
+          const styleIdx = sMatch && sMatch[1] ? parseInt(sMatch[1], 10) : 0;
+          if (!isFinite(styleIdx)) continue;
+          if (!map[row]) map[row] = [];
+          map[row][col] = styleIdx;
+          hasEntries = true;
+        } catch (_) {
+          // Skip malformed tag and continue
         }
-        col--;
-        let row = 0;
-        while (ri < addr.length) {
-          row = row * 10 + (addr.charCodeAt(ri) - 48);
-          ri++;
-        }
-        row--;
-        if (!map[row]) map[row] = [];
-        map[row][col] = sMatch ? parseInt(sMatch[1], 10) : 0;
-        hasEntries = true;
       }
+    } catch (_) {
+      // If regex parsing fails entirely, return null
+      return null;
     }
 
     return hasEntries ? map : null;
@@ -471,9 +487,31 @@ const Parser = (() => {
       }
 
       if (ext === 'csv' || ext === 'tsv') {
-        const text = await readFile(file, true);
-        const delimiter = ext === 'tsv' ? '\t' : detectDelimiter(text);
-        const data = parseCsv(text, delimiter);
+        const buffer = await readFile(file, false);
+        const delimiter = ext === 'tsv' ? '\t' : null; // null = auto-detect
+        
+        // Try Rust/WASM implementation first
+        if (typeof RustEngine !== 'undefined' && RustEngine.ready()) {
+          try {
+            const result = await RustEngine.parseCsv(
+              new Uint8Array(buffer),
+              delimiter,
+              options
+            );
+            if (result && Array.isArray(result.sheets)) {
+              return result;
+            }
+            console.warn('[Parser] Rust CSV result has unexpected shape, falling back to JavaScript');
+          } catch (error) {
+            console.warn('[Parser] Rust CSV parsing failed, falling back to JavaScript:', error);
+            // Fall through to JS implementation
+          }
+        }
+
+        // JavaScript fallback
+        const text = new TextDecoder('utf-8').decode(buffer);
+        const finalDelimiter = ext === 'tsv' ? '\t' : detectDelimiter(text);
+        const data = parseCsv(text, finalDelimiter);
 
         // Normalize column count
         const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
@@ -495,6 +533,42 @@ const Parser = (() => {
 
       // Excel formats
       const buffer = await readFile(file, false);
+      
+      // Try Rust/WASM implementation first for XLSX
+      if (ext === 'xlsx' && typeof RustEngine !== 'undefined' && RustEngine.ready()) {
+        try {
+          const result = await RustEngine.parseXlsx(
+            new Uint8Array(buffer),
+            options
+          );
+          if (result && Array.isArray(result.sheets)) {
+            return result;
+          }
+          console.warn('[Parser] Rust XLSX result has unexpected shape, falling back to JavaScript');
+        } catch (error) {
+          console.warn('[Parser] Rust XLSX parsing failed, falling back to JavaScript:', error);
+          // Fall through to JS implementation
+        }
+      }
+
+      // Try Rust/WASM implementation for XLS
+      if (ext === 'xls' && typeof RustEngine !== 'undefined' && RustEngine.ready()) {
+        try {
+          const result = await RustEngine.parseXls(
+            new Uint8Array(buffer),
+            options
+          );
+          if (result && Array.isArray(result.sheets)) {
+            return result;
+          }
+          console.warn('[Parser] Rust XLS result has unexpected shape, falling back to JavaScript');
+        } catch (error) {
+          console.warn('[Parser] Rust XLS parsing failed, falling back to JavaScript:', error);
+          // Fall through to JS implementation
+        }
+      }
+
+      // JavaScript fallback
       return parseExcel(buffer, options);
     },
 
@@ -520,6 +594,52 @@ const Parser = (() => {
       }
 
       const buffer = await readFile(file, false);
+      
+      // Try Rust/WASM for preview if available
+      if (typeof RustEngine !== 'undefined' && RustEngine.ready()) {
+        try {
+          const previewOptions = {
+            ...options,
+            previewMode: true,
+            maxRows: options.sampleRows || DEFAULT_PREVIEW_ROWS
+          };
+          
+          if (ext === 'xlsx') {
+            const result = await RustEngine.parseXlsx(new Uint8Array(buffer), previewOptions);
+            if (!result || !Array.isArray(result.sheets)) throw new Error('Invalid WASM preview result');
+            return {
+              sheets: result.sheets,
+              previewMeta: {
+                rowCount: null,
+                colCount: result.sheets[0]?.data[0]?.length || 0,
+                sheetCount: result.sheets.length,
+                sampled: true,
+                sampleRows: result.sheets[0]?.data.length || 0,
+                fileSize: file.size || 0,
+              },
+            };
+          } else if (ext === 'xls') {
+            const result = await RustEngine.parseXls(new Uint8Array(buffer), previewOptions);
+            if (!result || !Array.isArray(result.sheets)) throw new Error('Invalid WASM preview result');
+            return {
+              sheets: result.sheets,
+              previewMeta: {
+                rowCount: null,
+                colCount: result.sheets[0]?.data[0]?.length || 0,
+                sheetCount: result.sheets.length,
+                sampled: true,
+                sampleRows: result.sheets[0]?.data.length || 0,
+                fileSize: file.size || 0,
+              },
+            };
+          }
+        } catch (error) {
+          console.warn('[Parser.preview] Rust preview failed, falling back:', error);
+          // Fall through to JS implementation
+        }
+      }
+
+      // JavaScript fallback
       return previewExcel(buffer, { ...options, fileSize: file.size || 0 });
     },
 
