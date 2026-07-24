@@ -1938,17 +1938,14 @@ describe('DragToSheetsApp', () => {
       const preview = await app.getResponsiveSeparatePreview(app.files[0]);
       app.renderPreviewTable(preview.data, 'untrusted.xlsx', preview.summary, preview.notices);
 
-      expect(Cleaner.apply).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.objectContaining({ trim: false, fixNumbers: false, normalizeHeaders: false }),
-        null
-      );
+      expect(Cleaner.apply).not.toHaveBeenCalled();
       expect(preview.notices).toContainEqual(expect.stringContaining('Fix numbers'));
       expect(app.previewTable.textContent).toContain('Fix numbers');
       expect(preview.data).toEqual([
         ['  Formula Result  ', '  ordinary header  '],
         [' 1234 ', ' 1,234 '],
       ]);
+      expect(preview.cleaningStats).toBeNull();
     });
 
     test('does not represent metadata-sensitive cleaning in merged Excel samples without metadata', async () => {
@@ -1980,13 +1977,10 @@ describe('DragToSheetsApp', () => {
 
       const preview = await app.getResponsiveMergePreview(app.getCleaningOptions());
 
-      expect(Cleaner.apply).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.objectContaining({ trim: false, fixNumbers: false, normalizeHeaders: false }),
-        null
-      );
+      expect(Cleaner.apply).not.toHaveBeenCalled();
       expect(preview.notices).toContainEqual(expect.stringContaining('Normalize headers'));
       expect(preview.merged.sheets[0].data).toEqual(rawSample);
+      expect(preview.cleaningStats).toBeNull();
     });
 
     test('sampled separate preview applies trim and fixNumbers', async () => {
@@ -2863,7 +2857,15 @@ describe('DragToSheetsApp', () => {
       document.getElementById('opt-headers').checked = false;
     });
 
-    function wrapStats(stats, scope = 'exact', evaluatedOps = {}) {
+    function wrapStats(stats, scope = 'exact', evaluatedOps = null) {
+      const inferred = evaluatedOps !== null ? evaluatedOps : {
+        trim: stats.trimmedValues > 0,
+        removeEmptyRows: stats.emptyRowsRemoved > 0,
+        removeEmptyColumns: stats.emptyColumnsRemoved > 0,
+        removeDuplicates: stats.duplicateRowsRemoved > 0,
+        fixNumbers: stats.numericValuesCorrected > 0,
+        normalizeHeaders: stats.headersNormalized > 0,
+      };
       return {
         stats,
         scope,
@@ -2874,7 +2876,7 @@ describe('DragToSheetsApp', () => {
           removeDuplicates: false,
           fixNumbers: false,
           normalizeHeaders: false,
-          ...evaluatedOps,
+          ...inferred,
         },
       };
     }
@@ -2905,7 +2907,7 @@ describe('DragToSheetsApp', () => {
       const el = document.getElementById('cleanup-results');
       const emptyEl = document.getElementById('cleanup-results-empty');
 
-      app.renderCleanupSummary(wrapStats(zeroStats(), 'exact'));
+      app.renderCleanupSummary(wrapStats(zeroStats(), 'exact', { trim: true }));
 
       expect(el.classList.contains('hidden')).toBe(false);
       expect(emptyEl.classList.contains('hidden')).toBe(false);
@@ -2917,7 +2919,7 @@ describe('DragToSheetsApp', () => {
       const titleEl = document.getElementById('cleanup-results-title');
       const emptyEl = document.getElementById('cleanup-results-empty');
 
-      app.renderCleanupSummary(wrapStats(zeroStats(), 'sample'));
+      app.renderCleanupSummary(wrapStats(zeroStats(), 'sample', { trim: true }));
 
       expect(titleEl.textContent).toBe('Changes in preview sample');
       expect(emptyEl.textContent).toBe('No changes detected in preview sample');
@@ -3030,7 +3032,7 @@ describe('DragToSheetsApp', () => {
       const app = new DragToSheetsApp();
       const titleEl = document.getElementById('cleanup-results-title');
 
-      app.renderCleanupSummary(wrapStats(zeroStats(), 'exact'));
+      app.renderCleanupSummary(wrapStats(zeroStats(), 'exact', { trim: true }));
 
       expect(titleEl.textContent).toBe('Cleanup applied');
     });
@@ -3305,6 +3307,270 @@ describe('DragToSheetsApp', () => {
     test('Cleaner.apply with 3 args and empty data returns consistent stats shape', () => {
       const result = Cleaner.apply([], { trim: true }, null);
       expect(result.stats).toEqual(Cleaner.emptyStats());
+    });
+
+    // ---- all-off exact paths hide summary ----
+
+    test('exact separate preview with every option off keeps the summary hidden', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => {
+        return Promise.resolve(fallback());
+      });
+      app.files = [{
+        file: new File(['csv'], 'test.csv'),
+        name: 'test.csv', ext: 'csv', size: 100,
+        parsed: { sheets: [{ name: 'test', data: [['Name'], ['Alice']], cellMeta: null }], themeColors: null },
+        stats: { sheetCount: 1, rowCount: 2, dataRowCount: 1, colCount: 1, cellCount: 2, styledCellCount: 0 },
+        contentFingerprint: 'a2', identityKey: 'test.csv::csv::100::1', lazy: false,
+      }];
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-empty-rows').checked = false;
+      document.getElementById('opt-numbers').checked = false;
+
+      // Simulate the wrapping logic that refreshPreview does for exact separate
+      const options = app.getCleaningOptions();
+      const cleanedResult = await app.getCleanedSheetData(0, 0);
+      const rawStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
+      const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+      const cleanedStats = hasCleaning && rawStats ? { stats: rawStats, scope: 'exact', evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false } } : null;
+
+      expect(hasCleaning).toBe(false);
+      expect(cleanedStats).toBeNull();
+    });
+
+    test('exact merge preview with every option off keeps the summary hidden', async () => {
+      const app = await createApp();
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-empty-rows').checked = false;
+      document.getElementById('opt-headers').checked = false;
+
+      const options = app.getCleaningOptions();
+      const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+
+      expect(hasCleaning).toBe(false);
+
+      const rawStats = { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 };
+      const mergeStats = hasCleaning && rawStats ? { stats: rawStats, scope: 'exact', evaluatedOperations: {} } : null;
+
+      expect(mergeStats).toBeNull();
+    });
+
+    test('all-off exact paths do not display the zero-change message', () => {
+      const app = new DragToSheetsApp();
+      const el = document.getElementById('cleanup-results');
+
+      app.renderCleanupSummary(null);
+
+      expect(el.classList.contains('hidden')).toBe(true);
+    });
+
+    // ---- structural-only samples return null ----
+
+    test('structural-only separate sample returns cleaningStats null', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+      app.files = [{
+        file: new File(['csv'], 'test.csv'),
+        name: 'test.csv', ext: 'csv', size: 100,
+        parsed: null,
+      }];
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-empty-rows').checked = true;
+      document.getElementById('opt-numbers').checked = false;
+      document.getElementById('opt-headers').checked = false;
+      Parser.preview.mockResolvedValue({
+        sheets: [{ name: 'test', data: [['Name'], ['Alice']] }],
+        previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: true },
+      });
+      Cleaner.apply.mockClear();
+
+      const preview = await app.getResponsiveSeparatePreview(app.files[0]);
+
+      expect(preview.cleaningStats).toBeNull();
+      expect(Cleaner.apply).not.toHaveBeenCalled();
+    });
+
+    test('structural-only merge sample returns cleaningStats null', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-empty-rows').checked = true;
+      document.getElementById('opt-numbers').checked = false;
+      document.getElementById('opt-headers').checked = false;
+      app.files = [
+        { name: 'a.csv', ext: 'csv', size: 100, parsed: null, file: new File(['a'], 'a.csv') },
+        { name: 'b.csv', ext: 'csv', size: 100, parsed: null, file: new File(['b'], 'b.csv') },
+      ];
+      Parser.preview
+        .mockResolvedValueOnce({
+          sheets: [{ name: 'a', data: [['Name'], ['Alice']] }],
+          previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: true },
+        })
+        .mockResolvedValueOnce({
+          sheets: [{ name: 'b', data: [['Name'], ['Bob']] }],
+          previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: true },
+        });
+      Cleaner.apply.mockClear();
+
+      const preview = await app.getResponsiveMergePreview(app.getCleaningOptions());
+
+      expect(preview.cleaningStats).toBeNull();
+      expect(Cleaner.apply).not.toHaveBeenCalled();
+    });
+
+    // ---- untrusted Excel single-option cases ----
+
+    function makeUntrustedExcelItem() {
+      return {
+        file: new File(['x'], 'untrusted.xlsx'),
+        name: 'untrusted.xlsx', ext: 'xlsx', size: 100,
+        parsed: null,
+      };
+    }
+
+    test('untrusted Excel with only trim enabled returns no summary', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+      app.files = [makeUntrustedExcelItem()];
+      document.getElementById('opt-trim').checked = true;
+      document.getElementById('opt-numbers').checked = false;
+      document.getElementById('opt-headers').checked = false;
+      Parser.preview.mockResolvedValue({
+        sheets: [{ name: 'u', data: [['  Col  '], ['  Val  ']] }],
+        previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: false },
+      });
+
+      const preview = await app.getResponsiveSeparatePreview(app.files[0]);
+
+      expect(preview.cleaningStats).toBeNull();
+    });
+
+    test('untrusted Excel with only number correction enabled returns no summary', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+      app.files = [makeUntrustedExcelItem()];
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-numbers').checked = true;
+      document.getElementById('opt-headers').checked = false;
+      Parser.preview.mockResolvedValue({
+        sheets: [{ name: 'u', data: [['Col'], ['123']] }],
+        previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: false },
+      });
+
+      const preview = await app.getResponsiveSeparatePreview(app.files[0]);
+
+      expect(preview.cleaningStats).toBeNull();
+    });
+
+    test('untrusted Excel with only header normalization enabled returns no summary', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+      app.files = [makeUntrustedExcelItem()];
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-numbers').checked = false;
+      document.getElementById('opt-headers').checked = true;
+      Parser.preview.mockResolvedValue({
+        sheets: [{ name: 'u', data: [['first name'], ['Alice']] }],
+        previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: false },
+      });
+
+      const preview = await app.getResponsiveSeparatePreview(app.files[0]);
+
+      expect(preview.cleaningStats).toBeNull();
+    });
+
+    // ---- mixed: trim + duplicate → sample summary for trim only ----
+
+    test('mixed trim plus duplicate removal produces a sample summary for trim only', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+      app.files = [{
+        file: new File(['csv'], 'test.csv'),
+        name: 'test.csv', ext: 'csv', size: 100,
+        parsed: null,
+      }];
+      document.getElementById('opt-trim').checked = true;
+      document.getElementById('opt-duplicates').checked = true;
+      document.getElementById('opt-empty-rows').checked = false;
+      document.getElementById('opt-numbers').checked = false;
+      document.getElementById('opt-headers').checked = false;
+      Parser.preview.mockResolvedValue({
+        sheets: [{ name: 'test', data: [['  Name  '], ['  Alice  ']] }],
+        previewMeta: { rowCount: 2, colCount: 1, sheetCount: 1, sampled: true, sampleRows: 2, metadataTrusted: true },
+      });
+      Cleaner.apply.mockClear();
+      Cleaner.apply.mockImplementation((data, options, cellMeta) => ({
+        data: data.map(row => row.map(cell => typeof cell === 'string' ? cell.trim() : cell)),
+        cellMeta: cellMeta || null,
+        stats: { trimmedValues: 2, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+      }));
+
+      const preview = await app.getResponsiveSeparatePreview(app.files[0]);
+
+      expect(Cleaner.apply).toHaveBeenCalledTimes(1);
+      expect(preview.cleaningStats).not.toBeNull();
+      expect(preview.cleaningStats.scope).toBe('sample');
+      expect(preview.cleaningStats.evaluatedOperations.trim).toBe(true);
+      expect(preview.cleaningStats.evaluatedOperations.removeDuplicates).toBe(false);
+    });
+
+    // ---- renderer gating ----
+
+    test('renderer hides a result whose evaluatedOperations are all false', () => {
+      const app = new DragToSheetsApp();
+      const el = document.getElementById('cleanup-results');
+      el.classList.remove('hidden');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 5, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        scope: 'exact',
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false },
+      });
+
+      expect(el.classList.contains('hidden')).toBe(true);
+    });
+
+    test('renderer ignores a non-zero counter when its corresponding evaluated flag is false', () => {
+      const app = new DragToSheetsApp();
+      const listEl = document.getElementById('cleanup-results-list');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 5, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        scope: 'exact',
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: true, normalizeHeaders: false },
+      });
+
+      const items = listEl.querySelectorAll('.cleanup-results-item');
+      expect(items).toHaveLength(0);
+    });
+
+    test('one enabled and evaluated exact operation with zero changes still shows zero-change message', () => {
+      const app = new DragToSheetsApp();
+      const emptyEl = document.getElementById('cleanup-results-empty');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        scope: 'exact',
+        evaluatedOperations: { trim: true, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false },
+      });
+
+      expect(emptyEl.textContent).toBe('No cleanup changes detected');
+    });
+
+    test('one enabled and evaluated sampled operation with zero changes still shows sample zero-change message', () => {
+      const app = new DragToSheetsApp();
+      const emptyEl = document.getElementById('cleanup-results-empty');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        scope: 'sample',
+        evaluatedOperations: { trim: true, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false },
+      });
+
+      expect(emptyEl.textContent).toBe('No changes detected in preview sample');
     });
   });
 });

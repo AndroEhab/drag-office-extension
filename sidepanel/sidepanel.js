@@ -553,22 +553,26 @@
           removeEmptyColumns: false,
           removeDuplicates: false,
         };
-        const cleaned = Cleaner.apply(rawData, sanitized, cellMeta);
-        cleanedData = Array.isArray(cleaned) ? cleaned : cleaned.data;
-        const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
+        const hasEvaluatedOperation = sanitized.trim || sanitized.fixNumbers || sanitized.normalizeHeaders;
 
-        cleaningStats = {
-          stats,
-          scope: 'sample',
-          evaluatedOperations: {
-            trim: sanitized.trim,
-            removeEmptyRows: false,
-            removeEmptyColumns: false,
-            removeDuplicates: false,
-            fixNumbers: sanitized.fixNumbers,
-            normalizeHeaders: sanitized.normalizeHeaders,
-          },
-        };
+        if (hasEvaluatedOperation) {
+          const cleaned = Cleaner.apply(rawData, sanitized, cellMeta);
+          cleanedData = Array.isArray(cleaned) ? cleaned : cleaned.data;
+          const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
+
+          cleaningStats = {
+            stats,
+            scope: 'sample',
+            evaluatedOperations: {
+              trim: sanitized.trim,
+              removeEmptyRows: false,
+              removeEmptyColumns: false,
+              removeDuplicates: false,
+              fixNumbers: sanitized.fixNumbers,
+              normalizeHeaders: sanitized.normalizeHeaders,
+            },
+          };
+        }
       }
 
       return {
@@ -661,22 +665,26 @@
           removeEmptyColumns: false,
           removeDuplicates: false,
         };
-        const cleaned = Cleaner.apply(merged.sheets[0].data, sanitized, merged.sheets[0].cellMeta || null);
-        merged.sheets[0].data = Array.isArray(cleaned) ? cleaned : cleaned.data;
-        const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
+        const hasEvaluatedOperation = sanitized.trim || sanitized.fixNumbers || sanitized.normalizeHeaders;
 
-        cleaningStats = {
-          stats,
-          scope: 'sample',
-          evaluatedOperations: {
-            trim: sanitized.trim,
-            removeEmptyRows: false,
-            removeEmptyColumns: false,
-            removeDuplicates: false,
-            fixNumbers: sanitized.fixNumbers,
-            normalizeHeaders: sanitized.normalizeHeaders,
-          },
-        };
+        if (hasEvaluatedOperation) {
+          const cleaned = Cleaner.apply(merged.sheets[0].data, sanitized, merged.sheets[0].cellMeta || null);
+          merged.sheets[0].data = Array.isArray(cleaned) ? cleaned : cleaned.data;
+          const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
+
+          cleaningStats = {
+            stats,
+            scope: 'sample',
+            evaluatedOperations: {
+              trim: sanitized.trim,
+              removeEmptyRows: false,
+              removeEmptyColumns: false,
+              removeDuplicates: false,
+              fixNumbers: sanitized.fixNumbers,
+              normalizeHeaders: sanitized.normalizeHeaders,
+            },
+          };
+        }
       }
 
       return {
@@ -2160,12 +2168,6 @@
       this.cleanupResultsList.innerHTML = '';
     }
 
-    hasAnyCleaningOption() {
-      const options = this.getCleaningOptions();
-      return options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
-    }
-
     renderNoDataPreview(detail = '') {
       this.renderPreviewNotice('No data found in the imported file(s).', detail);
     }
@@ -2278,7 +2280,9 @@
         const sheet = merged.sheets[0];
         if (sheet && this.hasPreviewData(sheet.data)) {
           const rawMergeStats = merged.cleanStats || null;
-          const mergeStats = rawMergeStats ? {
+          const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+            options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+          const mergeStats = hasCleaning && rawMergeStats ? {
             stats: rawMergeStats,
             scope: 'exact',
             evaluatedOperations: {
@@ -2366,7 +2370,9 @@
         const cleanedResult = await this.getCleanedSheetData(isNaN(idx) ? 0 : idx, 0, options);
         const cleaned = Array.isArray(cleanedResult) ? cleanedResult : cleanedResult.data;
         const rawStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
-        const cleanedStats = rawStats ? {
+        const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+          options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+        const cleanedStats = hasCleaning && rawStats ? {
           stats: rawStats,
           scope: 'exact',
           evaluatedOperations: {
@@ -2967,7 +2973,15 @@
         return;
       }
 
-      const { stats, scope } = cleaningStats;
+      const { stats, scope, evaluatedOperations } = cleaningStats;
+      const evaluated = evaluatedOperations || {};
+      const hasEvaluatedOperation = Object.values(evaluated).some(Boolean);
+
+      if (!hasEvaluatedOperation) {
+        this.clearCleanupResults();
+        return;
+      }
+
       const isSample = scope === 'sample';
       const title = isSample ? 'Changes in preview sample' : 'Cleanup applied';
       const emptyMsg = isSample ? 'No changes detected in preview sample' : 'No cleanup changes detected';
@@ -2976,22 +2990,22 @@
       this.cleanupResultsEmpty.textContent = emptyMsg;
 
       const items = [];
-      if (stats.emptyRowsRemoved > 0) {
+      if (evaluated.removeEmptyRows && stats.emptyRowsRemoved > 0) {
         items.push({ count: stats.emptyRowsRemoved, label: `empty ${stats.emptyRowsRemoved === 1 ? 'row' : 'rows'} removed` });
       }
-      if (stats.emptyColumnsRemoved > 0) {
+      if (evaluated.removeEmptyColumns && stats.emptyColumnsRemoved > 0) {
         items.push({ count: stats.emptyColumnsRemoved, label: `empty ${stats.emptyColumnsRemoved === 1 ? 'column' : 'columns'} removed` });
       }
-      if (stats.duplicateRowsRemoved > 0) {
+      if (evaluated.removeDuplicates && stats.duplicateRowsRemoved > 0) {
         items.push({ count: stats.duplicateRowsRemoved, label: `duplicate ${stats.duplicateRowsRemoved === 1 ? 'row' : 'rows'} removed` });
       }
-      if (stats.trimmedValues > 0) {
+      if (evaluated.trim && stats.trimmedValues > 0) {
         items.push({ count: stats.trimmedValues, label: `${stats.trimmedValues === 1 ? 'value' : 'values'} trimmed` });
       }
-      if (stats.numericValuesCorrected > 0) {
+      if (evaluated.fixNumbers && stats.numericValuesCorrected > 0) {
         items.push({ count: stats.numericValuesCorrected, label: `numeric ${stats.numericValuesCorrected === 1 ? 'value' : 'values'} corrected` });
       }
-      if (stats.headersNormalized > 0) {
+      if (evaluated.normalizeHeaders && stats.headersNormalized > 0) {
         items.push({ count: stats.headersNormalized, label: `${stats.headersNormalized === 1 ? 'header' : 'headers'} normalized` });
       }
 
