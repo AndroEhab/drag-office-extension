@@ -1078,7 +1078,62 @@ body {
   max-height: 300px;
 }
 
-.preview-notice {
+/* ---- Cleanup Results Summary ---- */
+
+.cleanup-results {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+
+.cleanup-results-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+
+.cleanup-results-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.cleanup-results-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--color-text-secondary);
+}
+
+.cleanup-results-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cleanup-results-item {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.cleanup-results-item-count {
+  font-weight: 650;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cleanup-results-empty {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ---- Preview Notices ---- */
   padding: var(--space-4) var(--space-3);
   text-align: center;
   color: var(--color-text-muted);

@@ -7,15 +7,31 @@
 const Cleaner = (() => {
   'use strict';
 
+  function emptyStats() {
+    return {
+      trimmedValues: 0,
+      emptyRowsRemoved: 0,
+      emptyColumnsRemoved: 0,
+      duplicateRowsRemoved: 0,
+      numericValuesCorrected: 0,
+      headersNormalized: 0,
+    };
+  }
+
   /**
    * Apply all selected cleaning operations in sequence.
    * @param {string[][]} data - 2D array (row 0 = headers)
    * @param {Object} options - Cleaning options
    * @param {Object[][]} [cellMeta] - Optional 2D cell token array
-   * @returns {string[][]|{data: string[][], cellMeta: Object[][]}}
+   * @returns {string[][]|{data: string[][], cellMeta: Object[][], stats: Object}}
    */
   function apply(data, options, cellMeta) {
-    if (!data || data.length === 0) return cellMeta ? { data, cellMeta } : data;
+    const hasMetaArg = arguments.length >= 3;
+
+    if (!data || data.length === 0) {
+      if (hasMetaArg) return { data, cellMeta: cellMeta || null, stats: emptyStats() };
+      return data;
+    }
 
     const hasWork =
       options.trim ||
@@ -25,25 +41,32 @@ const Cleaner = (() => {
       options.fixNumbers ||
       options.normalizeHeaders;
 
-    if (!hasWork) return cellMeta ? { data, cellMeta } : data;
+    if (!hasWork) {
+      if (hasMetaArg) return { data, cellMeta: cellMeta || null, stats: emptyStats() };
+      return data;
+    }
 
     let result = data;
     let meta = cellMeta ? cellMeta.map(row => row.map(token => token ? { ...token } : { type: 'empty' })) : null;
+    const stats = emptyStats();
 
     if (options.trim) {
       const trimResult = trimWhitespace(result, meta);
       result = trimResult.data;
       meta = trimResult.cellMeta || null;
+      stats.trimmedValues = trimResult.stats.trimmedValues;
     }
     if (options.removeEmptyRows) {
       const opResult = removeEmptyRows(result, meta);
       result = opResult.data;
       meta = opResult.cellMeta || null;
+      stats.emptyRowsRemoved = opResult.stats.emptyRowsRemoved;
     }
     if (options.removeEmptyColumns) {
       const opResult = removeEmptyColumns(result, meta);
       result = opResult.data;
       meta = opResult.cellMeta || null;
+      stats.emptyColumnsRemoved = opResult.stats.emptyColumnsRemoved;
     }
     if (options.removeDuplicates) {
       const opResult = options.duplicateMode === 'absolute'
@@ -51,23 +74,23 @@ const Cleaner = (() => {
         : removeDuplicateRows(result, meta);
       result = opResult.data;
       meta = opResult.cellMeta || null;
+      stats.duplicateRowsRemoved = opResult.stats.duplicateRowsRemoved;
     }
     if (options.fixNumbers) {
       const opResult = fixNumberFormatting(result, meta);
       result = opResult.data;
       meta = opResult.cellMeta || null;
+      stats.numericValuesCorrected = opResult.stats.numericValuesCorrected;
     }
     if (options.normalizeHeaders) {
       const normResult = normalizeHeaders(result, meta);
-      if (Array.isArray(normResult)) {
-        result = normResult;
-      } else {
-        result = normResult.data;
-        meta = normResult.cellMeta || null;
-      }
+      result = normResult.data;
+      meta = normResult.cellMeta || null;
+      stats.headersNormalized = normResult.stats.headersNormalized;
     }
 
-    return cellMeta ? { data: result, cellMeta: meta } : result;
+    if (hasMetaArg) return { data: result, cellMeta: meta || null, stats };
+    return result;
   }
 
   /**
@@ -75,12 +98,14 @@ const Cleaner = (() => {
    * Numbers, booleans, null, and undefined pass through unchanged.
    */
   function trimWhitespace(data, meta) {
+    let trimmedCount = 0;
     const trimmedData = data.map((row, ri) =>
       row.map((cell, ci) => {
         const token = meta && meta[ri] ? meta[ri][ci] : null;
         if (meta && (!token || token.type !== 'string')) return cell;
         if (typeof cell === 'string') {
           const trimmed = cell.trim();
+          if (trimmed !== cell) trimmedCount++;
           if (token) {
             token.value = trimmed;
           }
@@ -89,16 +114,20 @@ const Cleaner = (() => {
         return cell;
       })
     );
-    return { data: trimmedData, cellMeta: meta || null };
+    return { data: trimmedData, cellMeta: meta || null, stats: { trimmedValues: trimmedCount } };
   }
 
   /**
    * Remove rows where all cells are empty or whitespace.
    * Always keeps the header row (index 0).
-   * @returns {{data: string[][]}} or {{data: string[][], cellMeta: Object[][]}}
+   * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
    */
   function removeEmptyRows(data, meta) {
-    if (data.length === 0) return meta ? { data, cellMeta: meta } : { data };
+    if (data.length === 0) {
+      const result = { data, stats: { emptyRowsRemoved: 0 } };
+      if (meta) result.cellMeta = meta;
+      return result;
+    }
 
     const keepIndices = [0];
     for (let i = 1; i < data.length; i++) {
@@ -112,17 +141,22 @@ const Cleaner = (() => {
       if (!isEmpty) keepIndices.push(i);
     }
 
-    const result = { data: keepIndices.map((i) => data[i]) };
+    const removed = data.length - keepIndices.length;
+    const result = { data: keepIndices.map((i) => data[i]), stats: { emptyRowsRemoved: removed } };
     if (meta) result.cellMeta = keepIndices.map((i) => meta[i]);
     return result;
   }
 
   /**
    * Remove columns where all cells (including header) are empty.
-   * @returns {{data: string[][]}} or {{data: string[][], cellMeta: Object[][]}}
+   * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
    */
   function removeEmptyColumns(data, meta) {
-    if (data.length === 0) return meta ? { data, cellMeta: meta } : { data };
+    if (data.length === 0) {
+      const result = { data, stats: { emptyColumnsRemoved: 0 } };
+      if (meta) result.cellMeta = meta;
+      return result;
+    }
 
     const colCount = data.reduce((max, r) => Math.max(max, r.length), 0);
     const keepCols = [];
@@ -138,7 +172,8 @@ const Cleaner = (() => {
       if (hasContent) keepCols.push(col);
     }
 
-    const result = { data: data.map((row) => keepCols.map((col) => row[col] ?? '')) };
+    const removed = colCount - keepCols.length;
+    const result = { data: data.map((row) => keepCols.map((col) => row[col] ?? '')), stats: { emptyColumnsRemoved: removed } };
     if (meta) {
       result.cellMeta = meta.map((row) =>
         keepCols.map((col) => (row ? row[col] || { type: 'empty' } : { type: 'empty' }))
@@ -150,10 +185,14 @@ const Cleaner = (() => {
   /**
    * Remove ALL occurrences of any row that appears more than once.
    * Uses token-based comparison via metadata tokens (or tokenFromValue fallback).
-   * @returns {{data: string[][]}} or {{data: string[][], cellMeta: Object[][]}}
+   * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
    */
   function removeAbsoluteDuplicates(data, meta) {
-    if (data.length <= 1) return meta ? { data, cellMeta: meta } : { data };
+    if (data.length <= 1) {
+      const result = { data, stats: { duplicateRowsRemoved: 0 } };
+      if (meta) result.cellMeta = meta;
+      return result;
+    }
 
     const keys = new Array(data.length);
     const counts = new Map();
@@ -174,7 +213,8 @@ const Cleaner = (() => {
       if (counts.get(keys[i]) === 1) keepIndices.push(i);
     }
 
-    const result = { data: keepIndices.map((i) => data[i]) };
+    const removed = data.length - keepIndices.length;
+    const result = { data: keepIndices.map((i) => data[i]), stats: { duplicateRowsRemoved: removed } };
     if (meta) result.cellMeta = keepIndices.map((i) => meta[i]);
     return result;
   }
@@ -182,10 +222,14 @@ const Cleaner = (() => {
   /**
    * Remove duplicate rows keeping first occurrence.
    * Uses token-based comparison via metadata tokens (or tokenFromValue fallback).
-   * @returns {{data: string[][]}} or {{data: string[][], cellMeta: Object[][]}}
+   * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
    */
   function removeDuplicateRows(data, meta) {
-    if (data.length <= 1) return meta ? { data, cellMeta: meta } : { data };
+    if (data.length <= 1) {
+      const result = { data, stats: { duplicateRowsRemoved: 0 } };
+      if (meta) result.cellMeta = meta;
+      return result;
+    }
 
     const seen = new Set();
     const keepIndices = [0];
@@ -203,7 +247,8 @@ const Cleaner = (() => {
       }
     }
 
-    const result = { data: keepIndices.map((i) => data[i]) };
+    const removed = data.length - keepIndices.length;
+    const result = { data: keepIndices.map((i) => data[i]), stats: { duplicateRowsRemoved: removed } };
     if (meta) result.cellMeta = keepIndices.map((i) => meta[i]);
     return result;
   }
@@ -212,11 +257,16 @@ const Cleaner = (() => {
    * Convert text-formatted numbers to actual numbers.
    * Skips the header row. Converts all eligible numeric-looking strings.
    * Preserves leading-zero identifiers (postal codes, SKUs, etc.).
-   * @returns {{data: string[][]}} or {{data: string[][], cellMeta: Object[][]}}
+   * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
    */
   function fixNumberFormatting(data, meta) {
-    if (data.length <= 1) return meta ? { data, cellMeta: meta } : { data };
+    if (data.length <= 1) {
+      const result = { data, stats: { numericValuesCorrected: 0 } };
+      if (meta) result.cellMeta = meta;
+      return result;
+    }
 
+    let fixedCount = 0;
     let newMeta = meta ? meta.map((row) => [...row]) : null;
 
     const newData = data.map((row, rowIndex) => {
@@ -243,6 +293,7 @@ const Cleaner = (() => {
           }
           const num = Number(cleaned);
           if (Number.isFinite(num)) {
+            fixedCount++;
             if (newMeta) newMeta[rowIndex][colIndex] = { type: 'number', value: num };
             return num;
           }
@@ -252,7 +303,7 @@ const Cleaner = (() => {
       });
     });
 
-    const result = { data: newData };
+    const result = { data: newData, stats: { numericValuesCorrected: fixedCount } };
     if (meta) result.cellMeta = newMeta;
     return result;
   }
@@ -264,8 +315,14 @@ const Cleaner = (() => {
    * - Convert to Title Case
    */
   function normalizeHeaders(data, meta) {
-    if (data.length === 0) return meta ? { data, cellMeta: meta } : data;
+    const hasMeta = arguments.length >= 2;
 
+    if (data.length === 0) {
+      if (hasMeta) return { data, cellMeta: meta || null, stats: { headersNormalized: 0 } };
+      return [];
+    }
+
+    let normalizedCount = 0;
     const result = [...data];
     result[0] = data[0].map((header, ci) => {
       const token = meta && meta[0] ? meta[0][ci] : null;
@@ -276,13 +333,15 @@ const Cleaner = (() => {
         .replace(/\s+/g, ' ')
         .toLowerCase()
         .replace(/\b\w/g, (ch) => ch.toUpperCase());
+      if (normalized !== header) normalizedCount++;
       if (token) {
         token.value = normalized;
       }
       return normalized;
     });
 
-    return meta ? { data: result, cellMeta: meta } : result;
+    if (hasMeta) return { data: result, cellMeta: meta || null, stats: { headersNormalized: normalizedCount } };
+    return result;
   }
 
   /**
@@ -394,6 +453,7 @@ const Cleaner = (() => {
     fixNumberFormatting,
     normalizeHeaders,
     getStats,
+    emptyStats,
     // Cell-token helpers
     tokenFromValue,
     tokenFromCellData,

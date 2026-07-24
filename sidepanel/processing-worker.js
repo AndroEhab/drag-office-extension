@@ -62,13 +62,16 @@ self.onmessage = async (event) => {
       case 'mergeAndClean': {
         const merged = await Merger.merge(payload.files || [], payload.mergeOptions || {});
         const cleanOpts = payload.cleanOptions || {};
+        let cleanStats = null;
         merged.sheets = await Promise.all(merged.sheets.map(async (sheet) => {
           const cleaned = await Cleaner.apply(sheet.data, cleanOpts, sheet.cellMeta || null);
           if (Array.isArray(cleaned)) {
             return { name: sheet.name, data: cleaned, cellMeta: null };
           }
+          if (!cleanStats) cleanStats = cleaned.stats;
           return { name: sheet.name, data: cleaned.data, cellMeta: cleaned.cellMeta || null };
         }));
+        merged.cleanStats = cleanStats;
         result = merged;
         break;
       }

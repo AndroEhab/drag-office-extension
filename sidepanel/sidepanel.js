@@ -548,6 +548,15 @@
         notices.push('Row/column removal and duplicate filtering not shown in preview — applied on upload.');
       }
 
+      let cleaningStats = null;
+      const hasWork = cleaningOptions.trim || cleaningOptions.removeEmptyRows ||
+        cleaningOptions.removeEmptyColumns || cleaningOptions.removeDuplicates ||
+        cleaningOptions.fixNumbers || cleaningOptions.normalizeHeaders;
+      if (hasWork) {
+        const fullCleanResult = Cleaner.apply(rawData, cleaningOptions, cellMeta);
+        cleaningStats = Array.isArray(fullCleanResult) ? null : fullCleanResult.stats;
+      }
+
       return {
         data: cleanedData,
         notices,
@@ -558,6 +567,7 @@
           sampleRows: preview.previewMeta?.sampleRows,
           fileSize: preview.previewMeta?.fileSize || this.getFileSize(item),
         },
+        cleaningStats,
       };
     }
 
@@ -633,6 +643,15 @@
         notices.push('Row/column removal and duplicate filtering not shown in preview — applied on upload.');
       }
 
+      let cleaningStats = null;
+      const hasWork = cleaningOptions.trim || cleaningOptions.removeEmptyRows ||
+        cleaningOptions.removeEmptyColumns || cleaningOptions.removeDuplicates ||
+        cleaningOptions.fixNumbers || cleaningOptions.normalizeHeaders;
+      if (hasWork && merged.sheets[0]?.data) {
+        const fullCleanResult = Cleaner.apply(merged.sheets[0].data, cleaningOptions, merged.sheets[0].cellMeta || null);
+        cleaningStats = Array.isArray(fullCleanResult) ? null : fullCleanResult.stats;
+      }
+
       return {
         merged,
         notices,
@@ -642,6 +661,7 @@
           sampled: true,
           fileSize: this.getLoadedWorkloadHints().totalBytes,
         },
+        cleaningStats,
       };
     }
 
@@ -864,13 +884,16 @@
         { files: raw, mergeOptions: mergeOpts, cleanOptions: options },
         () => {
           const merged = Merger.merge(raw, mergeOpts);
+          let cleanStats = null;
           merged.sheets = merged.sheets.map((sheet) => {
             const cleaned = Cleaner.apply(sheet.data, options, sheet.cellMeta || null);
             if (Array.isArray(cleaned)) {
               return { name: sheet.name, data: cleaned, cellMeta: null };
             }
+            if (!cleanStats) cleanStats = cleaned.stats;
             return { name: sheet.name, data: cleaned.data, cellMeta: cleaned.cellMeta || null };
           });
+          merged.cleanStats = cleanStats;
           return merged;
         }
       )
@@ -904,6 +927,9 @@
       this.previewPanel = document.getElementById('preview-panel');
       this.previewTable = document.getElementById('preview-table');
       this.previewStats = document.getElementById('preview-stats');
+      this.cleanupResults = document.getElementById('cleanup-results');
+      this.cleanupResultsList = document.getElementById('cleanup-results-list');
+      this.cleanupResultsEmpty = document.getElementById('cleanup-results-empty');
       this.uploadBtn = document.getElementById('upload-btn');
       this.settingsBtn = document.getElementById('settings-btn');
       this.cleaningOptions = document.getElementById('cleaning-options');
@@ -2146,7 +2172,7 @@
 
             const sheet = samplePreview.merged.sheets[0];
             if (sheet && this.hasPreviewData(sheet.data)) {
-              this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, samplePreview.summary, samplePreview.notices);
+              this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, samplePreview.summary, samplePreview.notices, samplePreview.cleaningStats);
               this.previewPanel.classList.remove('hidden');
               this.logTiming('refresh preview sample', previewStart, {
                 mode,
@@ -2210,7 +2236,7 @@
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         const sheet = merged.sheets[0];
         if (sheet && this.hasPreviewData(sheet.data)) {
-          this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`);
+          this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, {}, [], merged.cleanStats || null);
           this.previewPanel.classList.remove('hidden');
           this.logTiming('refresh preview', previewStart, {
             mode,
@@ -2247,7 +2273,7 @@
             const samplePreview = await this.getResponsiveSeparatePreview(item);
             if (!this.isPreviewTaskCurrent(previewTaskId)) return;
             if (this.hasPreviewData(samplePreview.data)) {
-              this.renderPreviewTable(samplePreview.data, item.name, samplePreview.summary, samplePreview.notices);
+              this.renderPreviewTable(samplePreview.data, item.name, samplePreview.summary, samplePreview.notices, samplePreview.cleaningStats);
               this.previewPanel.classList.remove('hidden');
             } else {
               this.renderNoDataPreview();
@@ -2285,9 +2311,10 @@
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         const cleanedResult = await this.getCleanedSheetData(isNaN(idx) ? 0 : idx, 0, options);
         const cleaned = Array.isArray(cleanedResult) ? cleanedResult : cleanedResult.data;
+        const cleanedStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         if (this.hasPreviewData(cleaned)) {
-          this.renderPreviewTable(cleaned, item.name);
+          this.renderPreviewTable(cleaned, item.name, {}, [], cleanedStats);
           this.previewPanel.classList.remove('hidden');
         } else {
           this.renderNoDataPreview();
@@ -2771,7 +2798,7 @@
       return select;
     }
 
-    renderPreviewTable(data, label = '', summary = {}, notices = []) {
+    renderPreviewTable(data, label = '', summary = {}, notices = [], cleaningStats = null) {
       if (!this.hasPreviewData(data)) {
         this.renderNoDataPreview();
         return;
@@ -2865,6 +2892,47 @@
 
       this.previewStats.textContent = parts.join(' • ');
       this.previewTable.innerHTML = html;
+      this.renderCleanupSummary(cleaningStats);
+    }
+
+    renderCleanupSummary(cleaningStats) {
+      if (!cleaningStats) {
+        this.cleanupResults.classList.add('hidden');
+        return;
+      }
+
+      const items = [];
+      if (cleaningStats.emptyRowsRemoved > 0) {
+        items.push({ count: cleaningStats.emptyRowsRemoved, label: `empty ${cleaningStats.emptyRowsRemoved === 1 ? 'row' : 'rows'} removed` });
+      }
+      if (cleaningStats.emptyColumnsRemoved > 0) {
+        items.push({ count: cleaningStats.emptyColumnsRemoved, label: `empty ${cleaningStats.emptyColumnsRemoved === 1 ? 'column' : 'columns'} removed` });
+      }
+      if (cleaningStats.duplicateRowsRemoved > 0) {
+        items.push({ count: cleaningStats.duplicateRowsRemoved, label: `duplicate ${cleaningStats.duplicateRowsRemoved === 1 ? 'row' : 'rows'} removed` });
+      }
+      if (cleaningStats.trimmedValues > 0) {
+        items.push({ count: cleaningStats.trimmedValues, label: `${cleaningStats.trimmedValues === 1 ? 'value' : 'values'} trimmed` });
+      }
+      if (cleaningStats.numericValuesCorrected > 0) {
+        items.push({ count: cleaningStats.numericValuesCorrected, label: `numeric ${cleaningStats.numericValuesCorrected === 1 ? 'value' : 'values'} corrected` });
+      }
+      if (cleaningStats.headersNormalized > 0) {
+        items.push({ count: cleaningStats.headersNormalized, label: `${cleaningStats.headersNormalized === 1 ? 'header' : 'headers'} normalized` });
+      }
+
+      if (items.length === 0) {
+        this.cleanupResultsList.innerHTML = '';
+        this.cleanupResultsEmpty.classList.remove('hidden');
+      } else {
+        this.cleanupResultsEmpty.classList.add('hidden');
+        this.cleanupResultsList.innerHTML = items.map((item) =>
+          `<li class="cleanup-results-item"><span class="cleanup-results-item-count">${item.count}</span> ${this.escapeHtml(item.label)}</li>`
+        ).join('');
+      }
+
+      this.cleanupResults.classList.remove('hidden');
+      this.renderIcons(this.cleanupResults);
     }
 
     hidePreview() {
@@ -2872,6 +2940,7 @@
       this.mappingReview.classList.add('hidden');
       this.previewStats.textContent = '';
       this.previewTable.innerHTML = '';
+      this.cleanupResults.classList.add('hidden');
     }
 
     // ---- Upload ----

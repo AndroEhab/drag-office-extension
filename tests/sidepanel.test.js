@@ -37,13 +37,32 @@ global.Parser = {
 };
 
 global.Cleaner = {
-  apply: jest.fn((data, options, cellMeta) => ({ data, cellMeta: cellMeta || null })),
+  apply: jest.fn((data, options, cellMeta) => ({
+    data,
+    cellMeta: cellMeta || null,
+    stats: {
+      trimmedValues: 0,
+      emptyRowsRemoved: 0,
+      emptyColumnsRemoved: 0,
+      duplicateRowsRemoved: 0,
+      numericValuesCorrected: 0,
+      headersNormalized: 0,
+    },
+  })),
   tokenFromValue: jest.fn(v => {
     if (v === null || v === undefined || v === '') return { type: 'empty' };
     if (typeof v === 'number') return { type: 'number', value: v };
     if (typeof v === 'boolean') return { type: 'boolean', value: v };
     return { type: 'string', value: String(v) };
   }),
+  emptyStats: jest.fn(() => ({
+    trimmedValues: 0,
+    emptyRowsRemoved: 0,
+    emptyColumnsRemoved: 0,
+    duplicateRowsRemoved: 0,
+    numericValuesCorrected: 0,
+    headersNormalized: 0,
+  })),
 };
 
 global.Merger = {
@@ -174,6 +193,10 @@ function setupDOM() {
       <select id="preview-select"></select>
       <div id="preview-stats"></div>
       <div id="preview-table"></div>
+      <div id="cleanup-results" class="cleanup-results hidden">
+        <ul id="cleanup-results-list" class="cleanup-results-list"></ul>
+        <p id="cleanup-results-empty" class="cleanup-results-empty hidden">No cleanup changes detected</p>
+      </div>
     </div>
     <div class="actions">
       <button id="upload-btn" disabled>Open in Sheets</button>
@@ -2823,6 +2846,156 @@ describe('DragToSheetsApp', () => {
       const callArgs = GoogleAPI.createSpreadsheet.mock.calls[0];
       const sheetsArg = callArgs[1];
       expect(sheetsArg[0].cellMeta).toEqual(formulaMeta);
+    });
+  });
+
+  describe('cleanup results summary', () => {
+    beforeEach(() => {
+      setupDOM();
+      document.getElementById('opt-trim').checked = false;
+      document.getElementById('opt-empty-rows').checked = false;
+      document.getElementById('opt-empty-cols').checked = false;
+      document.getElementById('opt-duplicates').checked = false;
+      document.getElementById('opt-numbers').checked = false;
+      document.getElementById('opt-headers').checked = false;
+    });
+
+    test('renderCleanupSummary hides section when stats is null', () => {
+      const app = new DragToSheetsApp();
+      const el = document.getElementById('cleanup-results');
+      el.classList.remove('hidden');
+
+      app.renderCleanupSummary(null);
+
+      expect(el.classList.contains('hidden')).toBe(true);
+    });
+
+    test('renderCleanupSummary shows "No cleanup changes detected" when all stats are zero', () => {
+      const app = new DragToSheetsApp();
+      const el = document.getElementById('cleanup-results');
+      const emptyEl = document.getElementById('cleanup-results-empty');
+
+      app.renderCleanupSummary({
+        trimmedValues: 0,
+        emptyRowsRemoved: 0,
+        emptyColumnsRemoved: 0,
+        duplicateRowsRemoved: 0,
+        numericValuesCorrected: 0,
+        headersNormalized: 0,
+      });
+
+      expect(el.classList.contains('hidden')).toBe(false);
+      expect(emptyEl.classList.contains('hidden')).toBe(false);
+    });
+
+    test('renderCleanupSummary shows only non-zero stats', () => {
+      const app = new DragToSheetsApp();
+      const el = document.getElementById('cleanup-results');
+      const listEl = document.getElementById('cleanup-results-list');
+      const emptyEl = document.getElementById('cleanup-results-empty');
+
+      app.renderCleanupSummary({
+        trimmedValues: 0,
+        emptyRowsRemoved: 12,
+        emptyColumnsRemoved: 3,
+        duplicateRowsRemoved: 0,
+        numericValuesCorrected: 0,
+        headersNormalized: 6,
+      });
+
+      expect(el.classList.contains('hidden')).toBe(false);
+      expect(emptyEl.classList.contains('hidden')).toBe(true);
+
+      const items = listEl.querySelectorAll('.cleanup-results-item');
+      expect(items).toHaveLength(3);
+
+      const texts = Array.from(items).map((li) => li.textContent);
+      expect(texts).toContain('12 empty rows removed');
+      expect(texts).toContain('3 empty columns removed');
+      expect(texts).toContain('6 headers normalized');
+      expect(texts).not.toContain('24 duplicate rows removed');
+    });
+
+    test('renderCleanupSummary uses singular labels for count of 1', () => {
+      const app = new DragToSheetsApp();
+      const listEl = document.getElementById('cleanup-results-list');
+
+      app.renderCleanupSummary({
+        trimmedValues: 1,
+        emptyRowsRemoved: 1,
+        emptyColumnsRemoved: 0,
+        duplicateRowsRemoved: 0,
+        numericValuesCorrected: 1,
+        headersNormalized: 1,
+      });
+
+      const texts = Array.from(listEl.querySelectorAll('.cleanup-results-item')).map((li) => li.textContent);
+      expect(texts).toContain('1 value trimmed');
+      expect(texts).toContain('1 empty row removed');
+      expect(texts).toContain('1 numeric value corrected');
+      expect(texts).toContain('1 header normalized');
+    });
+
+    test('renderCleanupSummary shows all stat types when all are non-zero', () => {
+      const app = new DragToSheetsApp();
+      const listEl = document.getElementById('cleanup-results-list');
+
+      app.renderCleanupSummary({
+        trimmedValues: 18,
+        emptyRowsRemoved: 12,
+        emptyColumnsRemoved: 3,
+        duplicateRowsRemoved: 24,
+        numericValuesCorrected: 7,
+        headersNormalized: 6,
+      });
+
+      const items = listEl.querySelectorAll('.cleanup-results-item');
+      expect(items).toHaveLength(6);
+
+      const texts = Array.from(items).map((li) => li.textContent);
+      expect(texts).toContain('12 empty rows removed');
+      expect(texts).toContain('3 empty columns removed');
+      expect(texts).toContain('24 duplicate rows removed');
+      expect(texts).toContain('18 values trimmed');
+      expect(texts).toContain('7 numeric values corrected');
+      expect(texts).toContain('6 headers normalized');
+    });
+
+    test('renderPreviewTable calls renderCleanupSummary with stats', () => {
+      const app = new DragToSheetsApp();
+      const cleanupEl = document.getElementById('cleanup-results');
+
+      const renderCleanupSpy = jest.spyOn(app, 'renderCleanupSummary');
+
+      app.renderPreviewTable([['Name'], ['Alice']], '', {}, [], {
+        trimmedValues: 2,
+        emptyRowsRemoved: 0,
+        emptyColumnsRemoved: 0,
+        duplicateRowsRemoved: 0,
+        numericValuesCorrected: 0,
+        headersNormalized: 0,
+      });
+
+      expect(renderCleanupSpy).toHaveBeenCalledWith({
+        trimmedValues: 2,
+        emptyRowsRemoved: 0,
+        emptyColumnsRemoved: 0,
+        duplicateRowsRemoved: 0,
+        numericValuesCorrected: 0,
+        headersNormalized: 0,
+      });
+
+      renderCleanupSpy.mockRestore();
+    });
+
+    test('hidePreview hides cleanup results', () => {
+      const app = new DragToSheetsApp();
+      const el = document.getElementById('cleanup-results');
+      el.classList.remove('hidden');
+
+      app.hidePreview();
+
+      expect(el.classList.contains('hidden')).toBe(true);
     });
   });
 });

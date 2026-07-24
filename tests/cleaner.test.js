@@ -486,6 +486,149 @@ describe('Cleaner', () => {
     });
   });
 
+  // ---- emptyStats ----
+
+  describe('emptyStats', () => {
+    test('returns all zero counters', () => {
+      const stats = Cleaner.emptyStats();
+      expect(stats).toEqual({
+        trimmedValues: 0,
+        emptyRowsRemoved: 0,
+        emptyColumnsRemoved: 0,
+        duplicateRowsRemoved: 0,
+        numericValuesCorrected: 0,
+        headersNormalized: 0,
+      });
+    });
+  });
+
+  // ---- cleaning stats via apply (with cellMeta) ----
+
+  describe('cleaningStats via apply', () => {
+    const baseOpts = (overrides) => ({
+      trim: false,
+      removeEmptyRows: false,
+      removeEmptyColumns: false,
+      removeDuplicates: false,
+      duplicateMode: 'keep-first',
+      fixNumbers: false,
+      normalizeHeaders: false,
+      ...overrides,
+    });
+
+    test('trimmedValues counts cells changed by trim', () => {
+      const data = [['  Name  ', '  Age  '], ['  Alice  ', '  30  '], ['  Bob   ', '   25  ']];
+      const result = Cleaner.apply(data, baseOpts({ trim: true }), null);
+      expect(result.stats.trimmedValues).toBe(6); // 6 cells trimmed
+      expect(result.stats.emptyRowsRemoved).toBe(0);
+      expect(result.stats.emptyColumnsRemoved).toBe(0);
+    });
+
+    test('trimmedValues is zero when nothing changes', () => {
+      const data = [['Name', 'Age'], ['Alice', '30']];
+      const result = Cleaner.apply(data, baseOpts({ trim: true }), null);
+      expect(result.stats.trimmedValues).toBe(0);
+    });
+
+    test('emptyRowsRemoved counts rows removed', () => {
+      const data = [['Name'], ['Alice'], [''], ['Bob'], ['', '']];
+      const result = Cleaner.apply(data, baseOpts({ removeEmptyRows: true }), null);
+      expect(result.stats.emptyRowsRemoved).toBe(2);
+    });
+
+    test('emptyRowsRemoved is zero when no empty rows', () => {
+      const data = [['Name'], ['Alice'], ['Bob']];
+      const result = Cleaner.apply(data, baseOpts({ removeEmptyRows: true }), null);
+      expect(result.stats.emptyRowsRemoved).toBe(0);
+    });
+
+    test('emptyColumnsRemoved counts columns removed', () => {
+      const data = [['Name', '', 'Age', '', ''], ['Alice', '', '30', '', '']];
+      const result = Cleaner.apply(data, baseOpts({ removeEmptyColumns: true }), null);
+      expect(result.stats.emptyColumnsRemoved).toBe(3);
+    });
+
+    test('emptyColumnsRemoved is zero when all columns have content', () => {
+      const data = [['Name', 'Age'], ['Alice', '30']];
+      const result = Cleaner.apply(data, baseOpts({ removeEmptyColumns: true }), null);
+      expect(result.stats.emptyColumnsRemoved).toBe(0);
+    });
+
+    test('duplicateRowsRemoved counts keep-first duplicates', () => {
+      const data = [['Name'], ['Alice'], ['Bob'], ['Alice'], ['Charlie'], ['Bob']];
+      const result = Cleaner.apply(data, baseOpts({ removeDuplicates: true, duplicateMode: 'keep-first' }), null);
+      expect(result.stats.duplicateRowsRemoved).toBe(2);
+    });
+
+    test('duplicateRowsRemoved counts absolute duplicates', () => {
+      const data = [['Name'], ['Alice'], ['Bob'], ['Alice'], ['Charlie'], ['Bob']];
+      const result = Cleaner.apply(data, baseOpts({ removeDuplicates: true, duplicateMode: 'absolute' }), null);
+      expect(result.stats.duplicateRowsRemoved).toBe(4);
+    });
+
+    test('duplicateRowsRemoved is zero with no duplicates', () => {
+      const data = [['Name'], ['Alice'], ['Bob'], ['Charlie']];
+      const result = Cleaner.apply(data, baseOpts({ removeDuplicates: true }), null);
+      expect(result.stats.duplicateRowsRemoved).toBe(0);
+    });
+
+    test('numericValuesCorrected counts cells converted from string to number', () => {
+      const data = [['Col'], ['42'], ['1,000'], ['3.14']];
+      const result = Cleaner.apply(data, baseOpts({ fixNumbers: true }), null);
+      expect(result.stats.numericValuesCorrected).toBe(3);
+    });
+
+    test('numericValuesCorrected skips non-numeric and already numeric', () => {
+      const data = [['Col'], ['hello'], [42], ['x123']];
+      const result = Cleaner.apply(data, baseOpts({ fixNumbers: true }), null);
+      expect(result.stats.numericValuesCorrected).toBe(0);
+    });
+
+    test('numericValuesCorrected skips header row', () => {
+      const data = [['42', '100'], ['1', '2']];
+      const result = Cleaner.apply(data, baseOpts({ fixNumbers: true }), null);
+      expect(result.stats.numericValuesCorrected).toBe(2); // only data row
+    });
+
+    test('headersNormalized counts headers changed', () => {
+      const data = [['first name', 'LAST_NAME', 'age'], ['Alice', 'Smith', '30']];
+      const result = Cleaner.apply(data, baseOpts({ normalizeHeaders: true }), null);
+      expect(result.stats.headersNormalized).toBe(3);
+    });
+
+    test('headersNormalized is zero when headers are already normalized', () => {
+      const data = [['Name', 'Age'], ['Alice', '30']];
+      const result = Cleaner.apply(data, baseOpts({ normalizeHeaders: true }), null);
+      expect(result.stats.headersNormalized).toBe(0);
+    });
+
+    test('combined operations aggregate all stats', () => {
+      const data = [
+        ['  name  ', '  ', '  age  '],
+        ['  Alice  ', '  ', '  30  '],
+        ['', '', ''],
+        ['  Alice  ', '  ', '  30  '],
+      ];
+      const result = Cleaner.apply(data, baseOpts({
+        trim: true,
+        removeEmptyRows: true,
+        removeEmptyColumns: true,
+        removeDuplicates: true,
+      }), null);
+      expect(result.stats.trimmedValues).toBeGreaterThan(0);
+      expect(result.stats.emptyRowsRemoved).toBe(1);
+      expect(result.stats.emptyColumnsRemoved).toBe(1);
+      expect(result.stats.duplicateRowsRemoved).toBe(1);
+    });
+
+    test('stats object present even for no-op operations', () => {
+      const data = [['Name'], ['Alice']];
+      const result = Cleaner.apply(data, baseOpts({ removeEmptyRows: true }), null);
+      expect(result.stats).toBeDefined();
+      expect(result.stats.emptyRowsRemoved).toBe(0);
+    });
+  });
+
   // ---- apply (pipeline) ----
 
   describe('apply', () => {
