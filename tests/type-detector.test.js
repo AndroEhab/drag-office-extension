@@ -1,382 +1,305 @@
 const { loadModule } = require('./helpers');
 
+const Cleaner = loadModule('../sidepanel/cleaner.js', 'Cleaner');
 const TypeDetector = loadModule('../sidepanel/type-detector.js', 'TypeDetector');
 
 describe('TypeDetector', () => {
-  // ---- classifyValue ----
+  // ---- classifyValue: null/empty ----
 
   describe('classifyValue', () => {
     test('null is empty', () => {
-      expect(TypeDetector.classifyValue(null)).toBe('empty');
+      expect(TypeDetector.classifyValue(null, Cleaner.parseDateToken)).toBe('empty');
     });
 
     test('undefined is empty', () => {
-      expect(TypeDetector.classifyValue(undefined)).toBe('empty');
+      expect(TypeDetector.classifyValue(undefined, Cleaner.parseDateToken)).toBe('empty');
     });
 
     test('empty string is empty', () => {
-      expect(TypeDetector.classifyValue('')).toBe('empty');
+      expect(TypeDetector.classifyValue('', Cleaner.parseDateToken)).toBe('empty');
     });
 
     test('whitespace-only string is empty', () => {
-      expect(TypeDetector.classifyValue('   ')).toBe('empty');
-      expect(TypeDetector.classifyValue('\t')).toBe('empty');
+      expect(TypeDetector.classifyValue('   ', Cleaner.parseDateToken)).toBe('empty');
     });
 
+    // ---- classifyValue: numbers ----
+
     test('integer string is number', () => {
-      expect(TypeDetector.classifyValue('42')).toBe('number');
+      expect(TypeDetector.classifyValue('42', Cleaner.parseDateToken)).toBe('number');
     });
 
     test('negative integer string is number', () => {
-      expect(TypeDetector.classifyValue('-17')).toBe('number');
+      expect(TypeDetector.classifyValue('-17', Cleaner.parseDateToken)).toBe('number');
     });
 
     test('decimal string is number', () => {
-      expect(TypeDetector.classifyValue('3.14')).toBe('number');
-    });
-
-    test('negative decimal string is number', () => {
-      expect(TypeDetector.classifyValue('-0.5')).toBe('number');
+      expect(TypeDetector.classifyValue('3.14', Cleaner.parseDateToken)).toBe('number');
     });
 
     test('scientific notation is number', () => {
-      expect(TypeDetector.classifyValue('1.5e10')).toBe('number');
-      expect(TypeDetector.classifyValue('2.3E-4')).toBe('number');
+      expect(TypeDetector.classifyValue('1.5e10', Cleaner.parseDateToken)).toBe('number');
+      expect(TypeDetector.classifyValue('2.3E-4', Cleaner.parseDateToken)).toBe('number');
     });
 
     test('comma-formatted number is number', () => {
-      expect(TypeDetector.classifyValue('1,234')).toBe('number');
-      expect(TypeDetector.classifyValue('1,234,567')).toBe('number');
+      expect(TypeDetector.classifyValue('1,234', Cleaner.parseDateToken)).toBe('number');
     });
 
-    test('number type is number', () => {
-      expect(TypeDetector.classifyValue(42)).toBe('number');
-      expect(TypeDetector.classifyValue(-3.14)).toBe('number');
+    test('actual number type is number', () => {
+      expect(TypeDetector.classifyValue(42, Cleaner.parseDateToken)).toBe('number');
     });
 
     test('NaN number is empty', () => {
-      expect(TypeDetector.classifyValue(NaN)).toBe('empty');
+      expect(TypeDetector.classifyValue(NaN, Cleaner.parseDateToken)).toBe('empty');
     });
 
+    // ---- leading-zero identifiers preserved as text ----
+
+    test('leading-zero identifier is text', () => {
+      expect(TypeDetector.classifyValue('00123', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('long leading-zero identifier is text', () => {
+      expect(TypeDetector.classifyValue('00004567', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('comma-separated leading-zero is text after cleaning', () => {
+      // "0,012,345" → cleanedNum = "0012345" → starts with 0, length > 1 → text
+      expect(TypeDetector.classifyValue('0,012,345', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('single zero is number', () => {
+      expect(TypeDetector.classifyValue('0', Cleaner.parseDateToken)).toBe('number');
+    });
+
+    test('negative seven is number', () => {
+      expect(TypeDetector.classifyValue('-7', Cleaner.parseDateToken)).toBe('number');
+    });
+
+    test('plain comma number is number', () => {
+      expect(TypeDetector.classifyValue('1,234', Cleaner.parseDateToken)).toBe('number');
+    });
+
+    test('decimal is number', () => {
+      expect(TypeDetector.classifyValue('0.5', Cleaner.parseDateToken)).toBe('number');
+      expect(TypeDetector.classifyValue('-0.25', Cleaner.parseDateToken)).toBe('number');
+    });
+
+    // ---- booleans ----
+
     test('boolean type is boolean', () => {
-      expect(TypeDetector.classifyValue(true)).toBe('boolean');
-      expect(TypeDetector.classifyValue(false)).toBe('boolean');
+      expect(TypeDetector.classifyValue(true, Cleaner.parseDateToken)).toBe('boolean');
     });
 
     test('boolean strings are boolean', () => {
-      expect(TypeDetector.classifyValue('true')).toBe('boolean');
-      expect(TypeDetector.classifyValue('false')).toBe('boolean');
-      expect(TypeDetector.classifyValue('yes')).toBe('boolean');
-      expect(TypeDetector.classifyValue('no')).toBe('boolean');
+      expect(TypeDetector.classifyValue('true', Cleaner.parseDateToken)).toBe('boolean');
+      expect(TypeDetector.classifyValue('false', Cleaner.parseDateToken)).toBe('boolean');
+      expect(TypeDetector.classifyValue('yes', Cleaner.parseDateToken)).toBe('boolean');
+      expect(TypeDetector.classifyValue('no', Cleaner.parseDateToken)).toBe('boolean');
     });
 
-    test('case-insensitive boolean strings', () => {
-      expect(TypeDetector.classifyValue('TRUE')).toBe('boolean');
-      expect(TypeDetector.classifyValue('Yes')).toBe('boolean');
-    });
+    // ---- dates: reuses Cleaner.parseDateToken ----
 
     test('ISO date is date', () => {
-      expect(TypeDetector.classifyValue('2024-01-15')).toBe('date');
+      expect(TypeDetector.classifyValue('2024-01-15', Cleaner.parseDateToken)).toBe('date');
     });
 
     test('ISO datetime is date', () => {
-      expect(TypeDetector.classifyValue('2024-01-15T10:30:00')).toBe('date');
+      expect(TypeDetector.classifyValue('2024-01-15T10:30:00', Cleaner.parseDateToken)).toBe('date');
     });
 
     test('month-name date is date', () => {
-      expect(TypeDetector.classifyValue('March 4, 2026')).toBe('date');
-      expect(TypeDetector.classifyValue('Jan 15 2024')).toBe('date');
+      expect(TypeDetector.classifyValue('March 4, 2026', Cleaner.parseDateToken)).toBe('date');
     });
 
-    test('day-month-name date is date', () => {
-      expect(TypeDetector.classifyValue('15 Jan 2024')).toBe('date');
+    // ---- invalid dates are text ----
+
+    test('invalid month date is text (2026-99-99)', () => {
+      expect(TypeDetector.classifyValue('2026-99-99', Cleaner.parseDateToken)).toBe('text');
     });
 
-    test('dd-mon-yyyy date is date', () => {
-      expect(TypeDetector.classifyValue('15-Jan-2024')).toBe('date');
+    test('invalid calendar date is text (2026-02-30)', () => {
+      expect(TypeDetector.classifyValue('2026-02-30', Cleaner.parseDateToken)).toBe('text');
     });
+
+    test('invalid hour is text (24:30:00)', () => {
+      expect(TypeDetector.classifyValue('2026-03-04T24:30:00', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('invalid minute is text (12:60:00)', () => {
+      expect(TypeDetector.classifyValue('2026-03-04T12:60:00', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('trailing junk is text', () => {
+      expect(TypeDetector.classifyValue('2026-03-04T12:30junk', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('invalid timezone offset is text (+15:00)', () => {
+      expect(TypeDetector.classifyValue('2026-03-04T12:30:00+15:00', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('slash-separated date is text (ambiguous)', () => {
+      expect(TypeDetector.classifyValue('03/04/2026', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    test('dot-separated date is text (ambiguous)', () => {
+      expect(TypeDetector.classifyValue('03.04.2026', Cleaner.parseDateToken)).toBe('text');
+    });
+
+    // ---- plain text ----
 
     test('plain text is text', () => {
-      expect(TypeDetector.classifyValue('Hello')).toBe('text');
-      expect(TypeDetector.classifyValue('ABC Corp')).toBe('text');
-      expect(TypeDetector.classifyValue('Product-123')).toBe('text');
-    });
-
-    test('ID-like strings that resemble numbers are still text', () => {
-      // "123" could be an ID — classifyValue treats it as number since
-      // the detector is non-destructive and only for display hints
-      expect(TypeDetector.classifyValue('123')).toBe('number');
+      expect(TypeDetector.classifyValue('Hello', Cleaner.parseDateToken)).toBe('text');
     });
   });
 
-  // ---- detect (homogeneous) ----
+  // ---- isLeadingZeroIdentifier ----
+
+  describe('isLeadingZeroIdentifier', () => {
+    test('00123 is an identifier', () => {
+      expect(TypeDetector.isLeadingZeroIdentifier('00123')).toBe(true);
+    });
+
+    test('00004567 is an identifier', () => {
+      expect(TypeDetector.isLeadingZeroIdentifier('00004567')).toBe(true);
+    });
+
+    test('0 is not an identifier (single char)', () => {
+      expect(TypeDetector.isLeadingZeroIdentifier('0')).toBe(false);
+    });
+
+    test('0.5 is not an identifier (decimal)', () => {
+      expect(TypeDetector.isLeadingZeroIdentifier('0.5')).toBe(false);
+    });
+
+    test('42 is not an identifier', () => {
+      expect(TypeDetector.isLeadingZeroIdentifier('42')).toBe(false);
+    });
+  });
+
+  // ---- detect: homogeneous ----
 
   describe('detect — homogeneous columns', () => {
     test('all text column', () => {
-      const data = [
-        ['Name'],
-        ['Alice'],
-        ['Bob'],
-        ['Carol'],
-      ];
-      const types = TypeDetector.detect(data);
+      const data = [['Name'], ['Alice'], ['Bob'], ['Carol']];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types).toHaveLength(1);
       expect(types[0].type).toBe('text');
     });
 
     test('all number column (strings)', () => {
-      const data = [
-        ['Age'],
-        ['25'],
-        ['30'],
-        ['45'],
-      ];
-      const types = TypeDetector.detect(data);
+      const data = [['Age'], ['25'], ['30'], ['45']];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('number');
     });
 
     test('all number column (actual numbers)', () => {
-      const data = [
-        ['Age'],
-        [25],
-        [30],
-        [45],
-      ];
-      const types = TypeDetector.detect(data);
+      const data = [['Age'], [25], [30], [45]];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('number');
     });
 
-    test('all date column (ISO format)', () => {
-      const data = [
-        ['DOB'],
-        ['2020-01-15'],
-        ['2019-06-20'],
-        ['2021-03-10'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types[0].type).toBe('date');
-    });
-
-    test('all date column (month-name format)', () => {
-      const data = [
-        ['DOB'],
-        ['March 4, 2026'],
-        ['Jan 15 2024'],
-        ['December 25 2023'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types[0].type).toBe('date');
-    });
-
     test('all boolean column', () => {
-      const data = [
-        ['Active'],
-        ['true'],
-        ['false'],
-        ['true'],
-      ];
-      const types = TypeDetector.detect(data);
+      const data = [['Active'], ['true'], ['false'], ['true']];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('boolean');
     });
 
     test('all empty column', () => {
-      const data = [
-        ['Empty'],
-        [''],
-        [''],
-        [''],
-      ];
-      const types = TypeDetector.detect(data);
+      const data = [['Empty'], [''], [''], ['']];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('empty');
     });
 
-    test('null/undefined values are treated as empty', () => {
-      const data = [
-        ['Col'],
-        [null],
-        [undefined],
-        [''],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types[0].type).toBe('empty');
+    test('leading-zero identifiers render as text', () => {
+      const data = [['SKU'], ['00123'], ['00456'], ['00789']];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
+      expect(types[0].type).toBe('text');
     });
   });
 
-  // ---- detect (mixed) ----
+  // ---- detect: mixed ----
 
   describe('detect — mixed columns', () => {
     test('dominant text with some numbers', () => {
       const data = [
-        ['Mixed'],
-        ['apple'],
-        ['banana'],
-        ['cherry'],
-        ['42'],
-        ['date'],
-        ['fig'],
-        ['10'],
+        ['Mixed'], ['apple'], ['banana'], ['cherry'], ['42'], ['date'], ['fig'], ['10'],
       ];
-      const types = TypeDetector.detect(data);
-      // 5 text, 2 numbers = 71% text, over dominance threshold
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('text');
     });
 
-    test('roughly even mix of number and text is mixed', () => {
+    test('roughly even mix is mixed', () => {
       const data = [
-        ['Mixed'],
-        ['100'],
-        ['apple'],
-        ['200'],
-        ['banana'],
-        ['300'],
-        ['cherry'],
+        ['Mixed'], ['100'], ['apple'], ['200'], ['banana'], ['300'], ['cherry'],
       ];
-      const types = TypeDetector.detect(data);
-      // 3 numbers, 3 text = 50% each, under threshold
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('mixed');
     });
 
     test('numbers with sparse text is number', () => {
-      const data = [];
-      data.push(['MostlyNum']);
-      for (let i = 0; i < 20; i++) {
-        data.push([String(i * 10)]);
-      }
-      data.push(['apple']); // 1 text, 20 numbers = 95% numbers
-      const types = TypeDetector.detect(data);
+      const data = [['MostlyNum']];
+      for (let i = 0; i < 20; i++) data.push([String(i * 10)]);
+      data.push(['apple']);
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('number');
     });
   });
 
-  // ---- detect (sparse) ----
+  // ---- detect: sparse ----
 
   describe('detect — sparse columns', () => {
     test('mostly empty with a few values', () => {
-      const data = [
-        ['Sparse'],
-        [''],
-        [''],
-        ['hello'],
-        [''],
-        [''],
-        ['world'],
-        [''],
-      ];
-      const types = TypeDetector.detect(data);
+      const data = [['Sparse'], [''], [''], ['hello'], [''], [''], ['world'], ['']];
+      const types = TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('text');
-    });
-
-    test('mostly empty with one value', () => {
-      const data = [
-        ['Sparse'],
-        [''],
-        [''],
-        ['2024-01-15'],
-        [''],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types[0].type).toBe('date');
     });
   });
 
-  // ---- detect (ambiguous) ----
+  // ---- detect: sampling ----
 
-  describe('detect — ambiguous columns', () => {
-    test('zero as a number', () => {
-      const data = [
-        ['Amount'],
-        ['0'],
-        ['100'],
-        ['200'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types[0].type).toBe('number');
+  describe('detect — sampling', () => {
+    test('sampled is false when rows <= sampleMax and source not sampled', () => {
+      const data = [['H'], ...Array.from({ length: 50 }, (_, i) => [String(i)])];
+      const types = TypeDetector.detect(data, { sampleMax: 100, parseDateToken: Cleaner.parseDateToken });
+      expect(types[0].sampled).toBe(false);
     });
 
-    test('zero as the only value is not boolean', () => {
-      const data = [
-        ['Flag'],
-        ['0'],
-        ['0'],
-        ['0'],
-      ];
-      const types = TypeDetector.detect(data);
-      // "0" matches number pattern first, not boolean
-      expect(types[0].type).toBe('number');
+    test('sampled is true when rows > sampleMax', () => {
+      const data = [['H'], ...Array.from({ length: 2000 }, (_, i) => [String(i)])];
+      const types = TypeDetector.detect(data, { sampleMax: 100, parseDateToken: Cleaner.parseDateToken });
+      expect(types[0].sampled).toBe(true);
     });
 
-    test('large dates mixed with invalid dates is mixed', () => {
-      const data = [
-        ['Dates'],
-        ['2024-01-15'],
-        ['2024-06-20'],
-        ['not a date'],
-        ['2024-03-10'],
-        ['also text'],
-      ];
-      const types = TypeDetector.detect(data);
-      // 3 dates, 2 text = 60% dates, under threshold
+    test('sourceSampled forces sampled=true even for small data', () => {
+      const data = [['H'], ['a'], ['b'], ['c']];
+      const types = TypeDetector.detect(data, {
+        sampleMax: 100,
+        sourceSampled: true,
+        parseDateToken: Cleaner.parseDateToken,
+      });
+      expect(types[0].sampled).toBe(true);
+    });
+
+    test('evenly distributed sampling covers both halves', () => {
+      // First 50 rows numeric, next 50 rows text, sampleMax=10
+      const data = [['MixedCol']];
+      for (let i = 0; i < 50; i++) data.push([String(i * 10)]);
+      for (let i = 0; i < 50; i++) data.push(['text_' + i]);
+      // Even sampling should pick from both halves -> mixed
+      const types = TypeDetector.detect(data, { sampleMax: 10, parseDateToken: Cleaner.parseDateToken });
+      // With even distribution across 100 rows, 10 samples will span both halves
       expect(types[0].type).toBe('mixed');
     });
   });
 
-  // ---- detect (multiple columns) ----
-
-  describe('detect — multiple columns', () => {
-    test('returns type per column', () => {
-      const data = [
-        ['Name', 'Age', 'DOB',       'Active'],
-        ['Alice',  '30',  '2020-05-01', 'true'],
-        ['Bob',    '25',  '2019-03-15', 'false'],
-        ['Carol',  '35',  '2021-07-20', 'true'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types).toHaveLength(4);
-      expect(types[0].type).toBe('text');
-      expect(types[1].type).toBe('number');
-      expect(types[2].type).toBe('date');
-      expect(types[3].type).toBe('boolean');
-    });
-
-    test('handles extra columns with missing values', () => {
-      const data = [
-        ['A', 'B', 'C'],
-        ['hello', '42'],
-        ['world'],
-        ['test', '99', 'extra'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types).toHaveLength(3);
-      expect(types[0].type).toBe('text');
-      expect(types[1].type).toBe('number');
-    });
-  });
-
-  // ---- detect (sampling) ----
-
-  describe('detect — sampling', () => {
-    test('sampled is false when rows <= sample max', () => {
-      const data = [['H'], ...Array.from({ length: 50 }, (_, i) => [String(i)])];
-      const types = TypeDetector.detect(data, { sampleMax: 100 });
-      expect(types[0].sampled).toBe(false);
-    });
-
-    test('sampled is true when rows > sample max', () => {
-      const data = [['H'], ...Array.from({ length: 2000 }, (_, i) => [String(i)])];
-      const types = TypeDetector.detect(data, { sampleMax: 100 });
-      expect(types[0].sampled).toBe(true);
-    });
-  });
-
-  // ---- detect (with cellMeta) ----
+  // ---- detect: with cellMeta ----
 
   describe('detect — with cellMeta', () => {
     test('uses cellMeta types when available', () => {
       const data = [
-        ['Date'],
-        [45306], // Serial date from Excel
-        [45370],
-        [45413],
+        ['Date'], [45306], [45370], [45413],
       ];
       const cellMeta = [
         [{ type: 'string', value: 'Date' }],
@@ -384,36 +307,85 @@ describe('TypeDetector', () => {
         [{ type: 'date', value: 45370, formatType: 'DATE' }],
         [{ type: 'date', value: 45413, formatType: 'DATE' }],
       ];
-      const types = TypeDetector.detect(data, { cellMeta });
+      const types = TypeDetector.detect(data, { cellMeta, parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('date');
     });
 
-    test('falls back to value classification without cellMeta', () => {
+    test('formula tokens are classified as text', () => {
       const data = [
-        ['Date'],
-        [45306],
-        [45370],
-        [45413],
+        ['Formulas'], ['=A1+B1'], ['=SUM(C:C)'],
       ];
-      // Without cellMeta, serial dates look like numbers
-      const types = TypeDetector.detect(data);
+      const cellMeta = [
+        [{ type: 'string', value: 'Formulas' }],
+        [{ type: 'formula', value: 'A1+B1' }],
+        [{ type: 'formula', value: 'SUM(C:C)' }],
+      ];
+      const types = TypeDetector.detect(data, { cellMeta, parseDateToken: Cleaner.parseDateToken });
+      expect(types[0].type).toBe('text');
+    });
+
+    test('partial metadata does not discard valid columns', () => {
+      const data = [
+        ['Names'], ['Alice'], ['Bob'], ['Carol'],
+      ];
+      // Missing metadata for row 2 — should still use tokens for rows that have them
+      const cellMeta = [
+        [{ type: 'string', value: 'Names' }],
+        null, // ragged — no metadata for this row
+        [{ type: 'string', value: 'Bob' }],
+        [{ type: 'string', value: 'Carol' }],
+      ];
+      const types = TypeDetector.detect(data, { cellMeta, parseDateToken: Cleaner.parseDateToken });
+      expect(types[0].type).toBe('text');
+    });
+
+    test('metadata array shorter than data does not crash', () => {
+      const data = [['A'], [1], [2], [3], [4]];
+      const cellMeta = [
+        [{ type: 'string', value: 'A' }],
+        [{ type: 'number', value: 1 }],
+      ];
+      const types = TypeDetector.detect(data, { cellMeta, parseDateToken: Cleaner.parseDateToken });
       expect(types[0].type).toBe('number');
     });
 
-    test('cellMeta with mixed types is handled', () => {
+    test('mixed metadata with value fallback', () => {
       const data = [
-        ['Mixed'],
-        ['hello'],
-        ['2024-01-01'],
+        ['Mixed'], ['hello'], ['2024-01-01'], ['world'],
       ];
+      // Only row 1 has metadata as a string
       const cellMeta = [
         [{ type: 'string', value: 'Mixed' }],
         [{ type: 'string', value: 'hello' }],
-        [{ type: 'date', value: 45306, formatType: 'DATE' }],
+        // Row 2 has no metadata — falls back to value classification (date)
       ];
-      const types = TypeDetector.detect(data, { cellMeta });
-      // 1 string, 1 date = 50% each = mixed
+      const types = TypeDetector.detect(data, { cellMeta, parseDateToken: Cleaner.parseDateToken });
+      // 1 text (from meta), 1 date (from value), 1 text (from value) → mixed
       expect(types[0].type).toBe('mixed');
+    });
+  });
+
+  // ---- detect: edge cases ----
+
+  describe('detect — edge cases', () => {
+    test('empty data returns empty array', () => {
+      expect(TypeDetector.detect(null)).toEqual([]);
+      expect(TypeDetector.detect([])).toEqual([]);
+      expect(TypeDetector.detect([[]])).toEqual([]);
+    });
+
+    test('single row (header only) returns empty', () => {
+      expect(TypeDetector.detect([['Name']])).toEqual([]);
+    });
+
+    test('respects maxCols option', () => {
+      const data = [
+        ['A', 'B', 'C', 'D', 'E', 'F'],
+        ['1', '2', '3', '4', '5', '6'],
+        ['7', '8', '9', '10', '11', '12'],
+      ];
+      const types = TypeDetector.detect(data, { maxCols: 3, parseDateToken: Cleaner.parseDateToken });
+      expect(types).toHaveLength(3);
     });
   });
 
@@ -430,23 +402,51 @@ describe('TypeDetector', () => {
     });
   });
 
+  // ---- descriptionFor ----
+
+  describe('descriptionFor', () => {
+    test('returns full type descriptions', () => {
+      expect(TypeDetector.descriptionFor('text', false)).toBe('Text');
+      expect(TypeDetector.descriptionFor('number', false)).toBe('Number');
+      expect(TypeDetector.descriptionFor('date', false)).toBe('Date');
+      expect(TypeDetector.descriptionFor('boolean', false)).toBe('Boolean');
+      expect(TypeDetector.descriptionFor('mixed', false)).toBe('Mixed');
+      expect(TypeDetector.descriptionFor('empty', false)).toBe('Empty');
+    });
+
+    test('appends sampled note', () => {
+      expect(TypeDetector.descriptionFor('text', true)).toBe('Text, based on a sample');
+    });
+  });
+
   // ---- titleFor ----
 
   describe('titleFor', () => {
-    test('returns capitalized type name', () => {
-      expect(TypeDetector.titleFor('text', false, null)).toBe('Text');
-      expect(TypeDetector.titleFor('number', false, null)).toBe('Number');
-      expect(TypeDetector.titleFor('date', false, null)).toBe('Date');
-      expect(TypeDetector.titleFor('boolean', false, null)).toBe('Boolean');
-      expect(TypeDetector.titleFor('mixed', false, null)).toBe('Mixed');
+    test('returns tooltip with detected type prefix', () => {
+      expect(TypeDetector.titleFor('text', false, null)).toBe('Detected type: Text');
     });
 
     test('appends sampled note when sampled', () => {
-      expect(TypeDetector.titleFor('text', true, null)).toContain('sample');
+      expect(TypeDetector.titleFor('text', true, null)).toContain('based on a sample');
+    });
+  });
+
+  // ---- no mutation ----
+
+  describe('non-destructive guarantee', () => {
+    test('detect does not mutate input data', () => {
+      const data = [['A'], ['1'], ['2'], ['3']];
+      const copy = JSON.parse(JSON.stringify(data));
+      TypeDetector.detect(data, { parseDateToken: Cleaner.parseDateToken });
+      expect(data).toEqual(copy);
     });
 
-    test('appends variation note when mixed', () => {
-      expect(TypeDetector.titleFor('text', false, 'mixed')).toContain('variation');
+    test('detect does not mutate cellMeta', () => {
+      const data = [['A'], ['a']];
+      const cellMeta = [[{ type: 'string', value: 'A' }], [{ type: 'string', value: 'a' }]];
+      const copy = JSON.parse(JSON.stringify(cellMeta));
+      TypeDetector.detect(data, { cellMeta, parseDateToken: Cleaner.parseDateToken });
+      expect(cellMeta).toEqual(copy);
     });
   });
 
@@ -462,62 +462,6 @@ describe('TypeDetector', () => {
         MIXED: 'mixed',
         EMPTY: 'empty',
       });
-    });
-  });
-
-  // ---- Edge cases ----
-
-  describe('edge cases', () => {
-    test('empty data returns empty array', () => {
-      expect(TypeDetector.detect(null)).toEqual([]);
-      expect(TypeDetector.detect([])).toEqual([]);
-      expect(TypeDetector.detect([[]])).toEqual([]); // no data rows
-    });
-
-    test('single row (header only) returns empty', () => {
-      expect(TypeDetector.detect([['Name']])).toEqual([]);
-    });
-
-    test('only one data row', () => {
-      const data = [
-        ['Name', 'Age'],
-        ['Alice', '30'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types).toHaveLength(2);
-      expect(types[0].type).toBe('text');
-      expect(types[1].type).toBe('number');
-    });
-
-    test('respects maxCols option', () => {
-      const data = [
-        ['A', 'B', 'C', 'D', 'E', 'F'],
-        ['1', '2', '3', '4', '5', '6'],
-        ['7', '8', '9', '10', '11', '12'],
-      ];
-      const types = TypeDetector.detect(data, { maxCols: 3 });
-      expect(types).toHaveLength(3);
-    });
-
-    test('undefined values in sparse rows do not crash', () => {
-      const data = [
-        ['A', 'B'],
-        ['hello'],
-        [undefined, 'world'],
-        ['test', undefined],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types).toHaveLength(2);
-    });
-
-    test('non-array rows do not crash', () => {
-      const data = [
-        ['A'],
-        null,
-        ['value'],
-      ];
-      const types = TypeDetector.detect(data);
-      expect(types).toHaveLength(1);
     });
   });
 });

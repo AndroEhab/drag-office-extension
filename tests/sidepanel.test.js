@@ -1,7 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
+const { loadModule } = require('./helpers');
+
 // ---- Mock dependent modules ----
+
+// Load the real Cleaner's parseDateToken before mocking
+const _realCleaner = loadModule('../sidepanel/cleaner.js', 'Cleaner');
 
 global.Parser = {
   isSupported: jest.fn((name) =>
@@ -111,6 +116,12 @@ global.FileHandleStore = {
   saveDirHandle: jest.fn().mockResolvedValue('mock-dir-id'),
   generateId: jest.fn(() => 'mock-id'),
 };
+
+// Load the real TypeDetector as a global for sidepanel integration
+global.TypeDetector = loadModule('../sidepanel/type-detector.js', 'TypeDetector');
+
+// Ensure Cleaner.parseDateToken is available for type detection
+global.Cleaner.parseDateToken = _realCleaner.parseDateToken;
 
 // ---- Load sidepanel module (expose class without auto-instantiation) ----
 
@@ -3655,6 +3666,235 @@ describe('DragToSheetsApp', () => {
 
       const items = listEl.querySelectorAll('.cleanup-results-item');
       expect(items[0].textContent).toContain('1 date normalized');
+    });
+  });
+
+  // ---- Column type detection integration ----
+
+  describe('column type detection', () => {
+    beforeEach(() => {
+      setupDOM();
+    });
+
+    test('detects types from full data beyond the 50-row display slice', () => {
+      const app = new DragToSheetsApp();
+      const data = [['Header']];
+      // 60 rows: first 55 are numbers, last 5 are text — but only 50 rendered
+      for (let i = 0; i < 55; i++) data.push([String(i)]);
+      for (let i = 0; i < 5; i++) data.push(['text']);
+
+      // Detection runs on all data (60 rows), not just 50 display rows
+      // 55 numbers, 5 text = 91.7% numbers > threshold, so type = number
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 61 }, [], null, {});
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      expect(indicators.length).toBeGreaterThan(0);
+      // The accessible label should say "Number" because numbers dominate
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan).not.toBeNull();
+      expect(srSpan.textContent.trim()).toMatch(/Number/);
+    });
+
+    test('responsive preview marks sampling', () => {
+      const app = new DragToSheetsApp();
+      const data = [['Header']];
+      for (let i = 0; i < 100; i++) data.push([String(i)]);
+
+      const typeCtx = { cellMeta: null, sourceSampled: true };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 101 }, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan.textContent.trim()).toContain('based on a sample');
+    });
+
+    test('exact small data is not marked sampled', () => {
+      const app = new DragToSheetsApp();
+      const data = [['Header'], ['hello'], ['world']];
+
+      const typeCtx = { sourceSampled: false };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 3 }, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan.textContent.trim()).not.toContain('based on a sample');
+    });
+
+    test('exact large data is marked sampled due to internal sampling', () => {
+      const app = new DragToSheetsApp();
+      const data = [['Header']];
+      for (let i = 0; i < 2000; i++) data.push([String(i)]);
+
+      const typeCtx = { sourceSampled: false };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 2001 }, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      // Internal sampling should mark it as sampled
+      expect(srSpan.textContent.trim()).toContain('based on a sample');
+    });
+
+    test('typed Excel serial dates render as Date through cellMeta', () => {
+      const app = new DragToSheetsApp();
+      const data = [
+        ['DateCol'], [45301], [45360], [45400],
+      ];
+      const cellMeta = [
+        [{ type: 'string', value: 'DateCol' }],
+        [{ type: 'date', value: 45301, formatType: 'DATE' }],
+        [{ type: 'date', value: 45360, formatType: 'DATE' }],
+        [{ type: 'date', value: 45400, formatType: 'DATE' }],
+      ];
+
+      const typeCtx = { cellMeta, sourceSampled: false };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 4 }, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan.textContent.trim()).toContain('Date');
+    });
+
+    test('formulas render as Text through cellMeta', () => {
+      const app = new DragToSheetsApp();
+      const data = [
+        ['Formulas'], ['=A1+B1'], ['=SUM(C:C)'],
+      ];
+      const cellMeta = [
+        [{ type: 'string', value: 'Formulas' }],
+        [{ type: 'formula', value: 'A1+B1' }],
+        [{ type: 'formula', value: 'SUM(C:C)' }],
+      ];
+
+      const typeCtx = { cellMeta, sourceSampled: false };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 3 }, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan.textContent.trim()).toContain('Text');
+    });
+
+    test('invalid date strings render as Text', () => {
+      const app = new DragToSheetsApp();
+      const data = [
+        ['BadDates'],
+        ['2026-99-99'],
+        ['2026-02-30'],
+        ['2026-03-04T24:30:00'],
+        ['03/04/2026'],
+      ];
+
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 5 }, [], null, {});
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      // All invalid dates should be text
+      expect(srSpan.textContent.trim()).toContain('Text');
+    });
+
+    test('leading-zero identifiers render as Text', () => {
+      const app = new DragToSheetsApp();
+      const data = [
+        ['SKU'], ['00123'], ['00456'], ['00789'], ['0,012,345'],
+      ];
+
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 5 }, [], null, {});
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan.textContent.trim()).toContain('Text');
+    });
+
+    test('partial metadata: valid tokens used, missing fall back to values', () => {
+      const app = new DragToSheetsApp();
+      const data = [
+        ['Names'], ['Alice'], ['Bob'], ['Carol'],
+      ];
+      // Metadata missing for row 1 — per-cell fallback
+      const cellMeta = [
+        [{ type: 'string', value: 'Names' }],
+        // Row 1 has no metadata
+        [{ type: 'string', value: 'Bob' }],
+        [{ type: 'string', value: 'Carol' }],
+      ];
+
+      const typeCtx = { cellMeta, sourceSampled: false };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 4 }, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const srSpan = indicators[0].querySelector('.sr-only');
+      expect(srSpan.textContent.trim()).toContain('Text');
+    });
+
+    test('type cells have accessible column semantics', () => {
+      const app = new DragToSheetsApp();
+      const data = [['A', 'B'], ['1', 'hello']];
+
+      app.renderPreviewTable(data, 'test', { totalCols: 2, totalRows: 2 }, [], null, {});
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      expect(indicators.length).toBe(2);
+
+      // Each indicator must be a <th scope="col">
+      for (const th of indicators) {
+        expect(th.tagName).toBe('TH');
+        expect(th.getAttribute('scope')).toBe('col');
+        // Must have a title attribute
+        expect(th.getAttribute('title')).toBeTruthy();
+        // Must have aria-hidden span
+        const ariaSpan = th.querySelector('span[aria-hidden="true"]');
+        expect(ariaSpan).not.toBeNull();
+        // Must have sr-only span
+        const srSpan = th.querySelector('span.sr-only');
+        expect(srSpan).not.toBeNull();
+        // Accessible label must contain meaningful words
+        expect(srSpan.textContent.trim().length).toBeGreaterThan(2);
+      }
+    });
+
+    test('non-destructive: data unchanged after detection', () => {
+      const app = new DragToSheetsApp();
+      const data = [['Values'], ['hello'], ['42'], ['true']];
+      const original = JSON.parse(JSON.stringify(data));
+
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 4 }, [], null, {});
+
+      expect(data).toEqual(original);
+    });
+
+    test('non-destructive: cellMeta unchanged after detection', () => {
+      const app = new DragToSheetsApp();
+      const data = [['Col'], ['a']];
+      const cellMeta = [[{ type: 'string', value: 'Col' }], [{ type: 'string', value: 'a' }]];
+      const original = JSON.parse(JSON.stringify(cellMeta));
+
+      const typeCtx = { cellMeta, sourceSampled: false };
+      app.renderPreviewTable(data, 'test', { totalCols: 1, totalRows: 2 }, [], null, typeCtx);
+
+      expect(cellMeta).toEqual(original);
+    });
+
+    test('truncated columns retain correct table alignment', () => {
+      const app = new DragToSheetsApp();
+      // 20 columns but only 15 display, 18 totalCols
+      const header = [];
+      for (let i = 0; i < 20; i++) header.push('Col' + i);
+      const row = [];
+      for (let i = 0; i < 20; i++) row.push(String(i));
+      const data = [header, row, row.map(v => v + '-2')];
+
+      app.renderPreviewTable(data, 'test', { totalCols: 18, totalRows: 3 }, [], null, {});
+
+      // Should have exactly 15 type indicators (MAX_COLS) + 1 truncated cell
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      // 15 column indicators + 1 truncated indicator = 16
+      expect(indicators.length).toBe(16);
+      // All indicators except the last should have accessible labels
+      for (let i = 0; i < 15; i++) {
+        const srSpan = indicators[i].querySelector('.sr-only');
+        expect(srSpan).not.toBeNull();
+      }
+      // The truncated indicator is empty
+      expect(indicators[15].textContent.trim()).toBe('');
     });
   });
 });

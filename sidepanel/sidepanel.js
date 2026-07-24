@@ -530,6 +530,7 @@
       const structuralOps = options.removeEmptyRows || options.removeEmptyColumns || options.removeDuplicates;
 
       let cleanedData = rawData;
+      let cleanedMeta = cellMeta;
       const notices = [];
       const cleaningOptions = { ...options };
 
@@ -559,6 +560,7 @@
         if (hasEvaluatedOperation) {
           const cleaned = Cleaner.apply(rawData, sanitized, cellMeta);
           cleanedData = Array.isArray(cleaned) ? cleaned : cleaned.data;
+          cleanedMeta = Array.isArray(cleaned) ? cellMeta : (cleaned.cellMeta || cellMeta);
           const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
 
           cleaningStats = {
@@ -579,6 +581,7 @@
 
       return {
         data: cleanedData,
+        cellMeta: cleanedMeta,
         notices,
         summary: {
           totalRows: preview.previewMeta?.rowCount,
@@ -673,6 +676,7 @@
         if (hasEvaluatedOperation) {
           const cleaned = Cleaner.apply(merged.sheets[0].data, sanitized, merged.sheets[0].cellMeta || null);
           merged.sheets[0].data = Array.isArray(cleaned) ? cleaned : cleaned.data;
+          merged.sheets[0].cellMeta = Array.isArray(cleaned) ? (merged.sheets[0].cellMeta || null) : (cleaned.cellMeta || merged.sheets[0].cellMeta || null);
           const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
 
           cleaningStats = {
@@ -2222,7 +2226,11 @@
 
             const sheet = samplePreview.merged.sheets[0];
             if (sheet && this.hasPreviewData(sheet.data)) {
-              this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, samplePreview.summary, samplePreview.notices, samplePreview.cleaningStats);
+              const mergeTypeCtx = {
+                cellMeta: sheet.cellMeta || null,
+                sourceSampled: true,
+              };
+              this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, samplePreview.summary, samplePreview.notices, samplePreview.cleaningStats, mergeTypeCtx);
               this.previewPanel.classList.remove('hidden');
               this.logTiming('refresh preview sample', previewStart, {
                 mode,
@@ -2302,7 +2310,11 @@
               normalizeHeaders: options.normalizeHeaders,
             },
           } : null;
-          this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, {}, [], mergeStats);
+          const exactMergeTypeCtx = {
+            cellMeta: sheet.cellMeta || null,
+            sourceSampled: false,
+          };
+          this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, {}, [], mergeStats, exactMergeTypeCtx);
           this.previewPanel.classList.remove('hidden');
           this.logTiming('refresh preview', previewStart, {
             mode,
@@ -2339,7 +2351,11 @@
             const samplePreview = await this.getResponsiveSeparatePreview(item);
             if (!this.isPreviewTaskCurrent(previewTaskId)) return;
             if (this.hasPreviewData(samplePreview.data)) {
-              this.renderPreviewTable(samplePreview.data, item.name, samplePreview.summary, samplePreview.notices, samplePreview.cleaningStats);
+              const sepTypeCtx = {
+                cellMeta: samplePreview.cellMeta || null,
+                sourceSampled: Boolean(samplePreview.summary.sampled),
+              };
+              this.renderPreviewTable(samplePreview.data, item.name, samplePreview.summary, samplePreview.notices, samplePreview.cleaningStats, sepTypeCtx);
               this.previewPanel.classList.remove('hidden');
             } else {
               this.renderNoDataPreview();
@@ -2377,6 +2393,7 @@
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         const cleanedResult = await this.getCleanedSheetData(isNaN(idx) ? 0 : idx, 0, options);
         const cleaned = Array.isArray(cleanedResult) ? cleanedResult : cleanedResult.data;
+        const cleanedMeta = Array.isArray(cleanedResult) ? null : (cleanedResult.cellMeta || null);
         const rawStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
         const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
           options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
@@ -2395,7 +2412,11 @@
         } : null;
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         if (this.hasPreviewData(cleaned)) {
-          this.renderPreviewTable(cleaned, item.name, {}, [], cleanedStats);
+          const exactSepTypeCtx = {
+            cellMeta: cleanedMeta || (item.parsed?.sheets?.[0]?.cellMeta || null),
+            sourceSampled: false,
+          };
+          this.renderPreviewTable(cleaned, item.name, {}, [], cleanedStats, exactSepTypeCtx);
           this.previewPanel.classList.remove('hidden');
         } else {
           this.renderNoDataPreview();
@@ -2879,7 +2900,7 @@
       return select;
     }
 
-    renderPreviewTable(data, label = '', summary = {}, notices = [], cleaningStats = null) {
+    renderPreviewTable(data, label = '', summary = {}, notices = [], cleaningStats = null, typeContext = {}) {
       if (!this.hasPreviewData(data)) {
         this.renderNoDataPreview();
         return;
@@ -2905,10 +2926,16 @@
         return s;
       };
 
-      // Non-destructive column type detection
+      // Non-destructive column type detection — run against full data, not the display slice
       let colTypes = [];
-      if (typeof TypeDetector !== 'undefined' && display.length > 0) {
-        colTypes = TypeDetector.detect(display, { maxCols: colCount });
+      if (typeof TypeDetector !== 'undefined' && data.length > 1) {
+        colTypes = TypeDetector.detect(data, {
+          maxCols: colCount,
+          sampleMax: 1000,
+          cellMeta: typeContext.cellMeta || null,
+          sourceSampled: Boolean(typeContext.sourceSampled),
+          parseDateToken: typeof Cleaner !== 'undefined' ? Cleaner.parseDateToken : null,
+        });
       }
 
       let html = '';
@@ -2923,20 +2950,24 @@
         html += '<tr class="col-label-row">';
         html += '<th class="gutter-corner"></th>'; // top-left corner
         for (let j = 0; j < colCount; j++) {
-          html += `<th class="col-label">${colLabel(j)}</th>`;
+          html += `<th class="col-label" scope="col">${colLabel(j)}</th>`;
         }
         if (truncatedCols) html += '<th class="col-label">…</th>';
         html += '</tr>';
 
-        // Type profiling row
+        // Type profiling row with accessible semantics
         if (colTypes.length > 0) {
           html += '<tr class="col-type-row">';
-          html += '<td class="gutter-corner"></td>';
+          html += '<td class="col-type-gutter" aria-hidden="true"></td>';
           for (let j = 0; j < colCount && j < colTypes.length; j++) {
             const ct = colTypes[j];
             const label = TypeDetector.labelFor(ct.type);
             const title = TypeDetector.titleFor(ct.type, ct.sampled, ct.note || null);
-            html += `<td class="col-type-indicator" title="${this.escapeHtml(title)}">${this.escapeHtml(label)}</td>`;
+            const accessible = 'Detected type: ' + TypeDetector.descriptionFor(ct.type, ct.sampled);
+            html += '<th scope="col" class="col-type-indicator" title="' + this.escapeHtml(title) + '">';
+            html += '<span aria-hidden="true">' + this.escapeHtml(label) + '</span>';
+            html += '<span class="sr-only">' + this.escapeHtml(accessible) + '</span>';
+            html += '</th>';
           }
           if (truncatedCols) html += '<td class="col-type-indicator"></td>';
           html += '</tr>';
