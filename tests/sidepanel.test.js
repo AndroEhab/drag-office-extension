@@ -186,6 +186,7 @@ function setupDOM() {
           </div>
         </div>
         <input type="checkbox" id="opt-numbers">
+        <input type="checkbox" id="opt-dates">
         <input type="checkbox" id="opt-headers">
       </div>
     </div>
@@ -1594,6 +1595,7 @@ describe('DragToSheetsApp', () => {
       document.getElementById('opt-empty-cols').checked = false;
       document.getElementById('opt-duplicates').checked = false;
       document.getElementById('opt-numbers').checked = true;
+      document.getElementById('opt-dates').checked = true;
       document.getElementById('opt-headers').checked = false;
 
       const opts = app.getCleaningOptions();
@@ -1603,6 +1605,7 @@ describe('DragToSheetsApp', () => {
       expect(opts.removeEmptyColumns).toBe(false);
       expect(opts.removeDuplicates).toBe(false);
       expect(opts.fixNumbers).toBe(true);
+      expect(opts.normalizeDates).toBe(true);
       expect(opts.normalizeHeaders).toBe(false);
       expect(opts.preserveFormatting).toBe(true);
     });
@@ -2864,6 +2867,7 @@ describe('DragToSheetsApp', () => {
         removeEmptyColumns: stats.emptyColumnsRemoved > 0,
         removeDuplicates: stats.duplicateRowsRemoved > 0,
         fixNumbers: stats.numericValuesCorrected > 0,
+        normalizeDates: stats.datesNormalized > 0,
         normalizeHeaders: stats.headersNormalized > 0,
       };
       return {
@@ -2875,6 +2879,7 @@ describe('DragToSheetsApp', () => {
           removeEmptyColumns: false,
           removeDuplicates: false,
           fixNumbers: false,
+          normalizeDates: false,
           normalizeHeaders: false,
           ...inferred,
         },
@@ -3332,8 +3337,8 @@ describe('DragToSheetsApp', () => {
       const cleanedResult = await app.getCleanedSheetData(0, 0);
       const rawStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
       const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
-      const cleanedStats = hasCleaning && rawStats ? { stats: rawStats, scope: 'exact', evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false } } : null;
+        options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
+      const cleanedStats = hasCleaning && rawStats ? { stats: rawStats, scope: 'exact', evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: false, normalizeHeaders: false } } : null;
 
       expect(hasCleaning).toBe(false);
       expect(cleanedStats).toBeNull();
@@ -3347,11 +3352,11 @@ describe('DragToSheetsApp', () => {
 
       const options = app.getCleaningOptions();
       const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+        options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
 
       expect(hasCleaning).toBe(false);
 
-      const rawStats = { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 };
+      const rawStats = { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 0, headersNormalized: 0 };
       const mergeStats = hasCleaning && rawStats ? { stats: rawStats, scope: 'exact', evaluatedOperations: {} } : null;
 
       expect(mergeStats).toBeNull();
@@ -3525,9 +3530,9 @@ describe('DragToSheetsApp', () => {
       el.classList.remove('hidden');
 
       app.renderCleanupSummary({
-        stats: { trimmedValues: 5, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        stats: { trimmedValues: 5, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 0, headersNormalized: 0 },
         scope: 'exact',
-        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false },
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: false, normalizeHeaders: false },
       });
 
       expect(el.classList.contains('hidden')).toBe(true);
@@ -3538,9 +3543,9 @@ describe('DragToSheetsApp', () => {
       const listEl = document.getElementById('cleanup-results-list');
 
       app.renderCleanupSummary({
-        stats: { trimmedValues: 5, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        stats: { trimmedValues: 5, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 0, headersNormalized: 0 },
         scope: 'exact',
-        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: true, normalizeHeaders: false },
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: true, normalizeDates: false, normalizeHeaders: false },
       });
 
       const items = listEl.querySelectorAll('.cleanup-results-item');
@@ -3552,9 +3557,9 @@ describe('DragToSheetsApp', () => {
       const emptyEl = document.getElementById('cleanup-results-empty');
 
       app.renderCleanupSummary({
-        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 0, headersNormalized: 0 },
         scope: 'exact',
-        evaluatedOperations: { trim: true, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false },
+        evaluatedOperations: { trim: true, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: false, normalizeHeaders: false },
       });
 
       expect(emptyEl.textContent).toBe('No cleanup changes detected');
@@ -3565,9 +3570,9 @@ describe('DragToSheetsApp', () => {
       const emptyEl = document.getElementById('cleanup-results-empty');
 
       app.renderCleanupSummary({
-        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, headersNormalized: 0 },
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 0, headersNormalized: 0 },
         scope: 'sample',
-        evaluatedOperations: { trim: true, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeHeaders: false },
+        evaluatedOperations: { trim: true, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: false, normalizeHeaders: false },
       });
 
       expect(emptyEl.textContent).toBe('No changes detected in preview sample');

@@ -525,7 +525,7 @@
       );
 
       const hasAnyOption = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+        options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
 
       const structuralOps = options.removeEmptyRows || options.removeEmptyColumns || options.removeDuplicates;
 
@@ -537,6 +537,7 @@
         notices.push(EXCEL_METADATA_PREVIEW_NOTICE);
         cleaningOptions.trim = false;
         cleaningOptions.fixNumbers = false;
+        cleaningOptions.normalizeDates = false;
         cleaningOptions.normalizeHeaders = false;
       }
 
@@ -553,7 +554,7 @@
           removeEmptyColumns: false,
           removeDuplicates: false,
         };
-        const hasEvaluatedOperation = sanitized.trim || sanitized.fixNumbers || sanitized.normalizeHeaders;
+        const hasEvaluatedOperation = sanitized.trim || sanitized.fixNumbers || sanitized.normalizeDates || sanitized.normalizeHeaders;
 
         if (hasEvaluatedOperation) {
           const cleaned = Cleaner.apply(rawData, sanitized, cellMeta);
@@ -569,6 +570,7 @@
               removeEmptyColumns: false,
               removeDuplicates: false,
               fixNumbers: sanitized.fixNumbers,
+              normalizeDates: sanitized.normalizeDates,
               normalizeHeaders: sanitized.normalizeHeaders,
             },
           };
@@ -640,7 +642,7 @@
 
       // Apply non-structural cleaning to merged sample
       const hasAnyOption = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+        options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
       const structuralOps = options.removeEmptyRows || options.removeEmptyColumns || options.removeDuplicates;
       const notices = [];
       const cleaningOptions = { ...options };
@@ -649,6 +651,7 @@
         notices.push(EXCEL_METADATA_PREVIEW_NOTICE);
         cleaningOptions.trim = false;
         cleaningOptions.fixNumbers = false;
+        cleaningOptions.normalizeDates = false;
         cleaningOptions.normalizeHeaders = false;
       }
 
@@ -665,7 +668,7 @@
           removeEmptyColumns: false,
           removeDuplicates: false,
         };
-        const hasEvaluatedOperation = sanitized.trim || sanitized.fixNumbers || sanitized.normalizeHeaders;
+        const hasEvaluatedOperation = sanitized.trim || sanitized.fixNumbers || sanitized.normalizeDates || sanitized.normalizeHeaders;
 
         if (hasEvaluatedOperation) {
           const cleaned = Cleaner.apply(merged.sheets[0].data, sanitized, merged.sheets[0].cellMeta || null);
@@ -681,6 +684,7 @@
               removeEmptyColumns: false,
               removeDuplicates: false,
               fixNumbers: sanitized.fixNumbers,
+              normalizeDates: sanitized.normalizeDates,
               normalizeHeaders: sanitized.normalizeHeaders,
             },
           };
@@ -854,6 +858,7 @@
         removeDuplicates: options.removeDuplicates,
         duplicateMode: options.removeDuplicates ? options.duplicateMode : 'keep-first',
         fixNumbers: options.fixNumbers,
+        normalizeDates: options.normalizeDates,
         normalizeHeaders: options.normalizeHeaders,
       });
     }
@@ -2079,6 +2084,7 @@
         removeDuplicates: document.getElementById('opt-duplicates').checked,
         duplicateMode: document.querySelector('input[name="dup-mode"]:checked')?.value ?? 'keep-first',
         fixNumbers: document.getElementById('opt-numbers').checked,
+        normalizeDates: document.getElementById('opt-dates').checked,
         normalizeHeaders: document.getElementById('opt-headers').checked,
         preserveFormatting: true,
       };
@@ -2281,7 +2287,7 @@
         if (sheet && this.hasPreviewData(sheet.data)) {
           const rawMergeStats = merged.cleanStats || null;
           const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-            options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+            options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
           const mergeStats = hasCleaning && rawMergeStats ? {
             stats: rawMergeStats,
             scope: 'exact',
@@ -2291,6 +2297,7 @@
               removeEmptyColumns: options.removeEmptyColumns,
               removeDuplicates: options.removeDuplicates,
               fixNumbers: options.fixNumbers,
+              normalizeDates: options.normalizeDates,
               normalizeHeaders: options.normalizeHeaders,
             },
           } : null;
@@ -2371,7 +2378,7 @@
         const cleaned = Array.isArray(cleanedResult) ? cleanedResult : cleanedResult.data;
         const rawStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
         const hasCleaning = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-          options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+          options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
         const cleanedStats = hasCleaning && rawStats ? {
           stats: rawStats,
           scope: 'exact',
@@ -2381,6 +2388,7 @@
             removeEmptyColumns: options.removeEmptyColumns,
             removeDuplicates: options.removeDuplicates,
             fixNumbers: options.fixNumbers,
+            normalizeDates: options.normalizeDates,
             normalizeHeaders: options.normalizeHeaders,
           },
         } : null;
@@ -3005,6 +3013,9 @@
       if (evaluated.fixNumbers && stats.numericValuesCorrected > 0) {
         items.push({ count: stats.numericValuesCorrected, label: `numeric ${stats.numericValuesCorrected === 1 ? 'value' : 'values'} corrected` });
       }
+      if (evaluated.normalizeDates && stats.datesNormalized > 0) {
+        items.push({ count: stats.datesNormalized, label: `${stats.datesNormalized === 1 ? 'date' : 'dates'} normalized` });
+      }
       if (evaluated.normalizeHeaders && stats.headersNormalized > 0) {
         items.push({ count: stats.headersNormalized, label: `${stats.headersNormalized === 1 ? 'header' : 'headers'} normalized` });
       }
@@ -3049,7 +3060,7 @@
         const apiContext = { responseCache: new Map(), tightGrid: shouldTightenGrid };
         const hasCleaning =
           options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-          options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+          options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
         const results = [];
         let releasedParsedEntries = false;
 
@@ -3272,7 +3283,7 @@
         const shouldTightenGrid = options.removeEmptyRows || options.removeEmptyColumns;
         const hasCleaning =
           options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
-          options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+          options.removeDuplicates || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
         const title = item.name.replace(/\.[^.]+$/, '') || `Sheet ${index + 1}`;
 
         this.setStatus(`Creating "${title}" in Google Sheets…`, 'loading');

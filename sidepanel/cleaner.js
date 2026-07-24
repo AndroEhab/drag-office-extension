@@ -15,6 +15,7 @@ const Cleaner = (() => {
       duplicateRowsRemoved: 0,
       numericValuesCorrected: 0,
       headersNormalized: 0,
+      datesNormalized: 0,
     };
   }
 
@@ -39,6 +40,7 @@ const Cleaner = (() => {
       options.removeEmptyColumns ||
       options.removeDuplicates ||
       options.fixNumbers ||
+      options.normalizeDates ||
       options.normalizeHeaders;
 
     if (!hasWork) {
@@ -81,6 +83,12 @@ const Cleaner = (() => {
       result = opResult.data;
       meta = opResult.cellMeta || null;
       stats.numericValuesCorrected = opResult.stats.numericValuesCorrected;
+    }
+    if (options.normalizeDates) {
+      const opResult = normalizeDates(result, meta);
+      result = opResult.data;
+      meta = opResult.cellMeta || null;
+      stats.datesNormalized = opResult.stats.datesNormalized;
     }
     if (options.normalizeHeaders) {
       const normResult = normalizeHeaders(result, meta);
@@ -309,6 +317,169 @@ const Cleaner = (() => {
   }
 
   /**
+   * Convert unambiguous date strings to spreadsheet date values.
+   *
+   * Recognised formats (conservative — no ambiguous numeric-only formats):
+   *   - ISO 8601:      2026-03-04  /  2026-3-4
+   *   - ISO datetime:  2026-03-04T12:30:00  /  with timezone suffix
+   *   - Month-name:    March 4, 2026  /  4 March 2026  /  Mar 4, 2026
+   *   - Hyphenated:    04-Mar-2026
+   *
+   * Rejected (ambiguous):
+   *   - All slash-separated formats (03/04/2026)
+   *   - All dot-separated formats (03.04.2026)
+   *   - Numeric-only hyphen formats other than ISO (03-04-2026)
+   *
+   * Skips: formula tokens, existing date tokens, identifiers, numeric strings.
+   *
+   * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
+   */
+  function normalizeDates(data, meta) {
+    const hasProvidedMeta = arguments.length >= 2 && meta != null;
+    let newMeta = hasProvidedMeta
+      ? meta.map((row) => [...row])
+      : data.map((row) => row.map((v) => tokenFromValue(v)));
+
+    let normalizedCount = 0;
+
+    const newData = data.map((row, ri) =>
+      row.map((cell, ci) => {
+        const token = newMeta[ri] && newMeta[ri][ci];
+
+        if (token && (token.type === 'formula' || token.type === 'date')) return cell;
+        if (typeof cell !== 'string') return cell;
+
+        const trimmed = cell.trim();
+        if (trimmed === '') return cell;
+
+        const parsed = parseDateString(trimmed);
+        if (!parsed) return cell;
+
+        const serial = dateToSheetsSerial(parsed);
+        if (serial == null) return cell;
+
+        normalizedCount++;
+        newMeta[ri][ci] = {
+          type: 'date',
+          value: serial,
+          formatType: parsed.hasTime ? 'DATE_TIME' : 'DATE',
+        };
+        return cell;
+      })
+    );
+
+    const result = { data: newData, stats: { datesNormalized: normalizedCount } };
+    result.cellMeta = newMeta;
+    return result;
+  }
+
+  // ---- Date parsing helpers ----
+
+  var MONTH_INDEX = {
+    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  };
+
+  var RE_ISO_DATE = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+  var RE_ISO_DATETIME = /^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/;
+  var RE_MONTH_DAY_YEAR = /^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})$/i;
+  var RE_DAY_MONTH_YEAR = /^(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})$/i;
+  var RE_DD_MON_YYYY = /^(\d{1,2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{4})$/i;
+
+  /**
+   * Parse a date string into { year, monthIndex, day, hasTime, hours, minutes, seconds }.
+   * Returns null if the string is not a recognised unambiguous date or is an invalid calendar date.
+   */
+  function parseDateString(str) {
+    // ISO datetime (must check before ISO date)
+    var m = str.match(RE_ISO_DATETIME);
+    if (m) {
+      var y = parseInt(m[1], 10);
+      var mo = parseInt(m[2], 10) - 1;
+      var d = parseInt(m[3], 10);
+      var h = parseInt(m[4], 10);
+      var mi = parseInt(m[5], 10);
+      var s = parseInt(m[6], 10);
+      if (!isValidCalendarDate(y, mo, d)) return null;
+      return { year: y, monthIndex: mo, day: d, hasTime: true, hours: h, minutes: mi, seconds: s };
+    }
+
+    // ISO date
+    m = str.match(RE_ISO_DATE);
+    if (m) {
+      y = parseInt(m[1], 10);
+      mo = parseInt(m[2], 10) - 1;
+      d = parseInt(m[3], 10);
+      if (!isValidCalendarDate(y, mo, d)) return null;
+      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+    }
+
+    // Month DD, YYYY  (e.g., "March 4, 2026")
+    m = str.match(RE_MONTH_DAY_YEAR);
+    if (m) {
+      mo = MONTH_INDEX[m[1].toLowerCase()];
+      d = parseInt(m[2], 10);
+      y = parseInt(m[3], 10);
+      if (mo === undefined || !isValidCalendarDate(y, mo, d)) return null;
+      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+    }
+
+    // DD Month YYYY  (e.g., "4 March 2026")
+    m = str.match(RE_DAY_MONTH_YEAR);
+    if (m) {
+      d = parseInt(m[1], 10);
+      mo = MONTH_INDEX[m[2].toLowerCase()];
+      y = parseInt(m[3], 10);
+      if (mo === undefined || !isValidCalendarDate(y, mo, d)) return null;
+      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+    }
+
+    // DD-Mon-YYYY  (e.g., "04-Mar-2026")
+    m = str.match(RE_DD_MON_YYYY);
+    if (m) {
+      d = parseInt(m[1], 10);
+      mo = MONTH_INDEX[m[2].toLowerCase()];
+      y = parseInt(m[3], 10);
+      if (mo === undefined || !isValidCalendarDate(y, mo, d)) return null;
+      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+    }
+
+    return null;
+  }
+
+  /**
+   * Returns true when year/month/day represent a real calendar date.
+   */
+  function isValidCalendarDate(year, monthIndex, day) {
+    var dt = new Date(Date.UTC(year, monthIndex, day));
+    return dt.getUTCFullYear() === year && dt.getUTCMonth() === monthIndex && dt.getUTCDate() === day;
+  }
+
+  /**
+   * Convert parsed date components to a Google Sheets serial date number.
+   * Uses the 1900 date system with the leap-year-bug adjustment.
+   */
+  var SHEETS_EPOCH_MS = Date.UTC(1899, 11, 30);
+  var MS_PER_DAY = 86400000;
+
+  function dateToSheetsSerial(parsed) {
+    var utcMs = Date.UTC(
+      parsed.year,
+      parsed.monthIndex,
+      parsed.day,
+      parsed.hours || 0,
+      parsed.minutes || 0,
+      parsed.seconds || 0
+    );
+    var serial = (utcMs - SHEETS_EPOCH_MS) / MS_PER_DAY;
+    if (serial >= 60) serial += 1;
+    if (!isFinite(serial)) return null;
+    return serial;
+  }
+
+  /**
    * Normalize header names:
    * - Trim whitespace
    * - Collapse multiple spaces to one
@@ -451,6 +622,7 @@ const Cleaner = (() => {
     removeDuplicateRows,
     removeAbsoluteDuplicates,
     fixNumberFormatting,
+    normalizeDates,
     normalizeHeaders,
     getStats,
     emptyStats,
