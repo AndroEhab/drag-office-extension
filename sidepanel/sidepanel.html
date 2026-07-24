@@ -173,14 +173,21 @@
         <span id="preview-stats" class="preview-stats"></span>
       </div>
       <div id="preview-table" class="preview-table-wrapper"></div>
-      <div id="cleanup-results" class="cleanup-results hidden">
+      <section
+        id="cleanup-results"
+        class="cleanup-results hidden"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-labelledby="cleanup-results-title"
+      >
         <div class="cleanup-results-header">
           <i data-lucide="sparkles" class="app-icon cleanup-results-icon" aria-hidden="true"></i>
-          <span class="cleanup-results-title">Cleanup applied</span>
+          <h4 id="cleanup-results-title" class="cleanup-results-title">Cleanup applied</h4>
         </div>
         <ul id="cleanup-results-list" class="cleanup-results-list"></ul>
         <p id="cleanup-results-empty" class="cleanup-results-empty hidden">No cleanup changes detected</p>
-      </div>
+      </section>
     </section>
 
     <div class="actions">

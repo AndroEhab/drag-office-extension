@@ -524,8 +524,10 @@
         Parser.hasTypedCellMetadata({ sheets: [{ data: rawData, cellMeta }] })
       );
 
+      const hasAnyOption = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
+
       const structuralOps = options.removeEmptyRows || options.removeEmptyColumns || options.removeDuplicates;
-      const hasNonStructural = options.trim || options.fixNumbers || options.normalizeHeaders;
 
       let cleanedData = rawData;
       const notices = [];
@@ -538,23 +540,35 @@
         cleaningOptions.normalizeHeaders = false;
       }
 
-      if (hasNonStructural) {
-        const sanitized = { ...cleaningOptions, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false };
-        const cleaned = Cleaner.apply(rawData, sanitized, cellMeta);
-        cleanedData = Array.isArray(cleaned) ? cleaned : cleaned.data;
-      }
-
       if (structuralOps) {
         notices.push('Row/column removal and duplicate filtering not shown in preview — applied on upload.');
       }
 
       let cleaningStats = null;
-      const hasWork = cleaningOptions.trim || cleaningOptions.removeEmptyRows ||
-        cleaningOptions.removeEmptyColumns || cleaningOptions.removeDuplicates ||
-        cleaningOptions.fixNumbers || cleaningOptions.normalizeHeaders;
-      if (hasWork) {
-        const fullCleanResult = Cleaner.apply(rawData, cleaningOptions, cellMeta);
-        cleaningStats = Array.isArray(fullCleanResult) ? null : fullCleanResult.stats;
+
+      if (hasAnyOption) {
+        const sanitized = {
+          ...cleaningOptions,
+          removeEmptyRows: false,
+          removeEmptyColumns: false,
+          removeDuplicates: false,
+        };
+        const cleaned = Cleaner.apply(rawData, sanitized, cellMeta);
+        cleanedData = Array.isArray(cleaned) ? cleaned : cleaned.data;
+        const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
+
+        cleaningStats = {
+          stats,
+          scope: 'sample',
+          evaluatedOperations: {
+            trim: sanitized.trim,
+            removeEmptyRows: false,
+            removeEmptyColumns: false,
+            removeDuplicates: false,
+            fixNumbers: sanitized.fixNumbers,
+            normalizeHeaders: sanitized.normalizeHeaders,
+          },
+        };
       }
 
       return {
@@ -621,8 +635,9 @@
       );
 
       // Apply non-structural cleaning to merged sample
+      const hasAnyOption = options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
       const structuralOps = options.removeEmptyRows || options.removeEmptyColumns || options.removeDuplicates;
-      const hasNonStructural = options.trim || options.fixNumbers || options.normalizeHeaders;
       const notices = [];
       const cleaningOptions = { ...options };
 
@@ -633,23 +648,35 @@
         cleaningOptions.normalizeHeaders = false;
       }
 
-      if (hasNonStructural && merged.sheets[0]?.data) {
-        const sanitized = { ...cleaningOptions, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false };
-        const cleaned = Cleaner.apply(merged.sheets[0].data, sanitized, merged.sheets[0].cellMeta || null);
-        merged.sheets[0].data = Array.isArray(cleaned) ? cleaned : cleaned.data;
-      }
-
       if (structuralOps) {
         notices.push('Row/column removal and duplicate filtering not shown in preview — applied on upload.');
       }
 
       let cleaningStats = null;
-      const hasWork = cleaningOptions.trim || cleaningOptions.removeEmptyRows ||
-        cleaningOptions.removeEmptyColumns || cleaningOptions.removeDuplicates ||
-        cleaningOptions.fixNumbers || cleaningOptions.normalizeHeaders;
-      if (hasWork && merged.sheets[0]?.data) {
-        const fullCleanResult = Cleaner.apply(merged.sheets[0].data, cleaningOptions, merged.sheets[0].cellMeta || null);
-        cleaningStats = Array.isArray(fullCleanResult) ? null : fullCleanResult.stats;
+
+      if (hasAnyOption && merged.sheets[0]?.data) {
+        const sanitized = {
+          ...cleaningOptions,
+          removeEmptyRows: false,
+          removeEmptyColumns: false,
+          removeDuplicates: false,
+        };
+        const cleaned = Cleaner.apply(merged.sheets[0].data, sanitized, merged.sheets[0].cellMeta || null);
+        merged.sheets[0].data = Array.isArray(cleaned) ? cleaned : cleaned.data;
+        const stats = Array.isArray(cleaned) ? Cleaner.emptyStats() : cleaned.stats;
+
+        cleaningStats = {
+          stats,
+          scope: 'sample',
+          evaluatedOperations: {
+            trim: sanitized.trim,
+            removeEmptyRows: false,
+            removeEmptyColumns: false,
+            removeDuplicates: false,
+            fixNumbers: sanitized.fixNumbers,
+            normalizeHeaders: sanitized.normalizeHeaders,
+          },
+        };
       }
 
       return {
@@ -2119,11 +2146,24 @@
     renderPreviewNotice(message, detail = '') {
       this.previewStats.textContent = detail;
       this.previewTable.innerHTML = `<div class="preview-notice">${this.escapeHtml(message)}</div>`;
+      this.clearCleanupResults();
       this.previewPanel.classList.remove('hidden');
     }
 
     hasPreviewData(data) {
       return Array.isArray(data) && data.length > 0;
+    }
+
+    clearCleanupResults() {
+      this.cleanupResults.classList.add('hidden');
+      this.cleanupResultsEmpty.classList.add('hidden');
+      this.cleanupResultsList.innerHTML = '';
+    }
+
+    hasAnyCleaningOption() {
+      const options = this.getCleaningOptions();
+      return options.trim || options.removeEmptyRows || options.removeEmptyColumns ||
+        options.removeDuplicates || options.fixNumbers || options.normalizeHeaders;
     }
 
     renderNoDataPreview(detail = '') {
@@ -2134,6 +2174,7 @@
     async refreshPreview() {
       const previewStart = this.now();
       const previewTaskId = this.beginPreviewTask();
+      this.clearCleanupResults();
       if (this.files.length === 0) {
         this.hidePreview();
         this.logTiming('refresh preview', previewStart, { files: 0, visible: false });
@@ -2236,7 +2277,20 @@
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         const sheet = merged.sheets[0];
         if (sheet && this.hasPreviewData(sheet.data)) {
-          this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, {}, [], merged.cleanStats || null);
+          const rawMergeStats = merged.cleanStats || null;
+          const mergeStats = rawMergeStats ? {
+            stats: rawMergeStats,
+            scope: 'exact',
+            evaluatedOperations: {
+              trim: options.trim,
+              removeEmptyRows: options.removeEmptyRows,
+              removeEmptyColumns: options.removeEmptyColumns,
+              removeDuplicates: options.removeDuplicates,
+              fixNumbers: options.fixNumbers,
+              normalizeHeaders: options.normalizeHeaders,
+            },
+          } : null;
+          this.renderPreviewTable(sheet.data, `Merged (${this.files.length} files)`, {}, [], mergeStats);
           this.previewPanel.classList.remove('hidden');
           this.logTiming('refresh preview', previewStart, {
             mode,
@@ -2311,7 +2365,19 @@
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         const cleanedResult = await this.getCleanedSheetData(isNaN(idx) ? 0 : idx, 0, options);
         const cleaned = Array.isArray(cleanedResult) ? cleanedResult : cleanedResult.data;
-        const cleanedStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
+        const rawStats = Array.isArray(cleanedResult) ? null : (cleanedResult.stats || null);
+        const cleanedStats = rawStats ? {
+          stats: rawStats,
+          scope: 'exact',
+          evaluatedOperations: {
+            trim: options.trim,
+            removeEmptyRows: options.removeEmptyRows,
+            removeEmptyColumns: options.removeEmptyColumns,
+            removeDuplicates: options.removeDuplicates,
+            fixNumbers: options.fixNumbers,
+            normalizeHeaders: options.normalizeHeaders,
+          },
+        } : null;
         if (!this.isPreviewTaskCurrent(previewTaskId)) return;
         if (this.hasPreviewData(cleaned)) {
           this.renderPreviewTable(cleaned, item.name, {}, [], cleanedStats);
@@ -2901,24 +2967,32 @@
         return;
       }
 
+      const { stats, scope } = cleaningStats;
+      const isSample = scope === 'sample';
+      const title = isSample ? 'Changes in preview sample' : 'Cleanup applied';
+      const emptyMsg = isSample ? 'No changes detected in preview sample' : 'No cleanup changes detected';
+
+      document.getElementById('cleanup-results-title').textContent = title;
+      this.cleanupResultsEmpty.textContent = emptyMsg;
+
       const items = [];
-      if (cleaningStats.emptyRowsRemoved > 0) {
-        items.push({ count: cleaningStats.emptyRowsRemoved, label: `empty ${cleaningStats.emptyRowsRemoved === 1 ? 'row' : 'rows'} removed` });
+      if (stats.emptyRowsRemoved > 0) {
+        items.push({ count: stats.emptyRowsRemoved, label: `empty ${stats.emptyRowsRemoved === 1 ? 'row' : 'rows'} removed` });
       }
-      if (cleaningStats.emptyColumnsRemoved > 0) {
-        items.push({ count: cleaningStats.emptyColumnsRemoved, label: `empty ${cleaningStats.emptyColumnsRemoved === 1 ? 'column' : 'columns'} removed` });
+      if (stats.emptyColumnsRemoved > 0) {
+        items.push({ count: stats.emptyColumnsRemoved, label: `empty ${stats.emptyColumnsRemoved === 1 ? 'column' : 'columns'} removed` });
       }
-      if (cleaningStats.duplicateRowsRemoved > 0) {
-        items.push({ count: cleaningStats.duplicateRowsRemoved, label: `duplicate ${cleaningStats.duplicateRowsRemoved === 1 ? 'row' : 'rows'} removed` });
+      if (stats.duplicateRowsRemoved > 0) {
+        items.push({ count: stats.duplicateRowsRemoved, label: `duplicate ${stats.duplicateRowsRemoved === 1 ? 'row' : 'rows'} removed` });
       }
-      if (cleaningStats.trimmedValues > 0) {
-        items.push({ count: cleaningStats.trimmedValues, label: `${cleaningStats.trimmedValues === 1 ? 'value' : 'values'} trimmed` });
+      if (stats.trimmedValues > 0) {
+        items.push({ count: stats.trimmedValues, label: `${stats.trimmedValues === 1 ? 'value' : 'values'} trimmed` });
       }
-      if (cleaningStats.numericValuesCorrected > 0) {
-        items.push({ count: cleaningStats.numericValuesCorrected, label: `numeric ${cleaningStats.numericValuesCorrected === 1 ? 'value' : 'values'} corrected` });
+      if (stats.numericValuesCorrected > 0) {
+        items.push({ count: stats.numericValuesCorrected, label: `numeric ${stats.numericValuesCorrected === 1 ? 'value' : 'values'} corrected` });
       }
-      if (cleaningStats.headersNormalized > 0) {
-        items.push({ count: cleaningStats.headersNormalized, label: `${cleaningStats.headersNormalized === 1 ? 'header' : 'headers'} normalized` });
+      if (stats.headersNormalized > 0) {
+        items.push({ count: stats.headersNormalized, label: `${stats.headersNormalized === 1 ? 'header' : 'headers'} normalized` });
       }
 
       if (items.length === 0) {
@@ -2940,7 +3014,7 @@
       this.mappingReview.classList.add('hidden');
       this.previewStats.textContent = '';
       this.previewTable.innerHTML = '';
-      this.cleanupResults.classList.add('hidden');
+      this.clearCleanupResults();
     }
 
     // ---- Upload ----
