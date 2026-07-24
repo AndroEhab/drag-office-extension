@@ -216,6 +216,10 @@ function setupDOM() {
     <div class="actions">
       <button id="upload-btn" disabled>Open in Sheets</button>
     </div>
+    <p class="privacy-note">
+      <i data-lucide="shield" class="app-icon privacy-note-icon" aria-hidden="true"></i>
+      <span>Your file contents are processed on this device and sent to Google only when you choose Open in Sheets. We do not collect analytics or track you.</span>
+    </p>
     <div id="loading-panel" class="loading-panel">
       <div class="loading-panel-progress">
         <div id="loading-panel-bar" class="loading-panel-bar" style="width:0%"></div>
@@ -1468,6 +1472,61 @@ describe('DragToSheetsApp', () => {
       app.files = [{ name: 'test.csv' }];
       app.updateUI();
       expect(app.uploadBtn.disabled).toBe(false);
+    });
+
+    test('privacy note exists exactly once', async () => {
+      await createApp();
+      const notes = document.querySelectorAll('.privacy-note');
+      expect(notes).toHaveLength(1);
+    });
+
+    test('privacy note contains the complete visible wording', async () => {
+      await createApp();
+      const note = document.querySelector('.privacy-note span');
+      expect(note.textContent).toBe(
+        'Your file contents are processed on this device and sent to Google only when you choose Open in Sheets. We do not collect analytics or track you.'
+      );
+    });
+
+    test('privacy note appears after the primary-action container and before the loading panel', async () => {
+      await createApp();
+      const actions = document.querySelector('.actions');
+      const note = document.querySelector('.privacy-note');
+      const panel = document.getElementById('loading-panel');
+      expect(
+        actions.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      expect(
+        note.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    test('privacy note shield icon has aria-hidden="true"', async () => {
+      await createApp();
+      const icon = document.querySelector('.privacy-note .app-icon');
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    test('privacy note explanatory text is available to assistive technology', async () => {
+      await createApp();
+      const span = document.querySelector('.privacy-note span');
+      expect(span).toBeTruthy();
+      expect(span.textContent.trim().length).toBeGreaterThan(0);
+    });
+
+    test('privacy note does not use role="alert" or aria-live', async () => {
+      await createApp();
+      const note = document.querySelector('.privacy-note');
+      expect(note.getAttribute('role')).not.toBe('alert');
+      expect(note.hasAttribute('aria-live')).toBe(false);
+    });
+
+    test('primary action visible text and accessible name remain unchanged', async () => {
+      await createApp();
+      const btn = document.getElementById('upload-btn');
+      expect(btn.textContent).toBe('Open in Sheets');
+      expect(btn.getAttribute('aria-label')).toBe('Open in Sheets');
+      expect(btn.getAttribute('role')).not.toBe('alert');
     });
   });
 
