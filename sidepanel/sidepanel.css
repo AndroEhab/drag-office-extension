@@ -814,6 +814,25 @@ body {
   border-top: 1px solid var(--color-border);
 }
 
+/* ---- Privacy Note ---- */
+
+.privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.privacy-note-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  stroke-width: 1.8;
+}
+
 /* ---- Settings Button (adjacent to options, before preview) ---- */
 
 .btn-settings {
