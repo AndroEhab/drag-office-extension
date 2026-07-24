@@ -112,21 +112,49 @@ const TypeDetector = (() => {
 
   /**
    * Map a cell metadata token to a type category.
+   * Typed tokens (number, date, boolean, formula, empty) are authoritative.
+   * String tokens are semantically classified unless formatType='TEXT'.
+   * Falls back to raw value classification when no usable token exists.
+   *
    * @param {Object|null} token
+   * @param {*} rawValue - the cell's raw displayed value
+   * @param {Function|null} parseDateToken - Cleaner.parseDateToken for date validation
    * @returns {'empty'|'number'|'date'|'boolean'|'text'}
    */
-  function classifyToken(token) {
-    if (!token) return 'empty';
-    if (token.type === 'empty') return 'empty';
-    if (token.type === 'number') return 'number';
-    if (token.type === 'date') return 'date';
-    if (token.type === 'boolean') return 'boolean';
-    if (token.type === 'formula') return 'text';
-    if (token.type === 'string') {
-      if (token.formatType === 'TEXT') return 'text';
-      return 'text';
+  function classifyToken(token, rawValue, parseDateToken) {
+    if (!token || !token.type) {
+      return classifyValue(rawValue, parseDateToken);
     }
-    return 'empty';
+
+    switch (token.type) {
+      case 'empty':
+        return 'empty';
+
+      case 'number':
+        return 'number';
+
+      case 'date':
+        return 'date';
+
+      case 'boolean':
+        return 'boolean';
+
+      case 'formula':
+        return 'text';
+
+      case 'string': {
+        if (token.formatType === 'TEXT') return 'text';
+
+        var value = token.value !== undefined && token.value !== null
+          ? token.value
+          : rawValue;
+
+        return classifyValue(value, parseDateToken);
+      }
+
+      default:
+        return classifyValue(rawValue, parseDateToken);
+    }
   }
 
   /**
@@ -170,17 +198,16 @@ const TypeDetector = (() => {
 
         var row = data[rowIdx];
 
-        // Per-cell metadata check — not all-or-nothing
+        // Per-cell metadata check — not all-or-nothing;
+        // explicit empty tokens are authoritative even if the raw cell has a stale value.
+        var rawValue = col < (row ? row.length : 0) ? row[col] : undefined;
         var metaToken = (cellMeta && Array.isArray(cellMeta[rowIdx])) ? cellMeta[rowIdx][col] : undefined;
 
-        if (metaToken && metaToken.type && metaToken.type !== 'empty') {
-          var ct = classifyToken(metaToken);
-          tally[ct] = (tally[ct] || 0) + 1;
-        } else {
-          var val = col < (row ? row.length : 0) ? row[col] : undefined;
-          var ct = classifyValue(val, parseDateToken);
-          tally[ct] = (tally[ct] || 0) + 1;
-        }
+        var ct = metaToken && metaToken.type
+          ? classifyToken(metaToken, rawValue, parseDateToken)
+          : classifyValue(rawValue, parseDateToken);
+
+        tally[ct] = (tally[ct] || 0) + 1;
         sampledCount++;
       }
 

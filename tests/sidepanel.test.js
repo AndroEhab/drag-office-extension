@@ -3809,10 +3809,10 @@ describe('DragToSheetsApp', () => {
       const data = [
         ['Names'], ['Alice'], ['Bob'], ['Carol'],
       ];
-      // Metadata missing for row 1 — per-cell fallback
+      // Row 1 metadata is null at its actual index — does NOT shift other rows
       const cellMeta = [
         [{ type: 'string', value: 'Names' }],
-        // Row 1 has no metadata
+        null, // absent metadata at the correct row index
         [{ type: 'string', value: 'Bob' }],
         [{ type: 'string', value: 'Carol' }],
       ];
@@ -3895,6 +3895,157 @@ describe('DragToSheetsApp', () => {
       }
       // The truncated indicator is empty
       expect(indicators[15].textContent.trim()).toBe('');
+    });
+
+    test('responsive separate CSV: detects types from represented values', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => fallback());
+
+      app.files = [{
+        name: 'people.csv',
+        ext: 'csv',
+        size: 1024,
+        stats: { sheetCount: 1, rowCount: 5, colCount: 4, cellCount: 20, styledCellCount: 0 },
+        parsed: null,
+        file: new File(['a'], 'people.csv'),
+      }];
+
+      Parser.preview.mockResolvedValue({
+        sheets: [{
+          name: 'people',
+          data: [
+            ['Age', 'Birthday', 'Active', 'SKU'],
+            ['42', '2026-03-04', 'true', '00123'],
+            ['30', '2024-01-15', 'false', '00456'],
+            ['25', '2025-06-20', 'true', '00789'],
+          ],
+        }],
+        previewMeta: { rowCount: 4, colCount: 4, sheetCount: 1, sampled: false, sampleRows: 4, fileSize: 1024 },
+      });
+
+      const preview = await app.getResponsiveSeparatePreview(app.files[0]);
+      const typeCtx = { cellMeta: preview.cellMeta || null, sourceSampled: Boolean(preview.summary.sampled) };
+      app.renderPreviewTable(preview.data, 'people.csv', preview.summary, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      expect(indicators.length).toBe(4);
+
+      const types = [];
+      for (const th of indicators) {
+        const sr = th.querySelector('.sr-only');
+        types.push(sr.textContent.trim());
+      }
+
+      expect(types[0]).toMatch(/Number/);   // Age
+      expect(types[1]).toMatch(/Date/);     // Birthday
+      expect(types[2]).toMatch(/Boolean/);  // Active
+      expect(types[3]).toMatch(/Text/);     // SKU (leading zero identifier)
+    });
+
+    test('responsive merge CSV: detects types from merged sampled data', async () => {
+      const app = await createApp();
+      jest.spyOn(app, 'runProcessingTask').mockImplementation((type, payload, fallback) => {
+        if (type === 'merge') return fallback();
+        if (type === 'preview') return fallback();
+        if (type === 'clean') return fallback();
+        return fallback();
+      });
+
+      app.files = [
+        {
+          name: 'one.csv',
+          ext: 'csv',
+          size: 1024,
+          stats: { sheetCount: 1, rowCount: 3, colCount: 2, cellCount: 6, styledCellCount: 0 },
+          parsed: null,
+          file: new File(['a'], 'one.csv'),
+        },
+        {
+          name: 'two.csv',
+          ext: 'csv',
+          size: 1024,
+          stats: { sheetCount: 1, rowCount: 3, colCount: 2, cellCount: 6, styledCellCount: 0 },
+          parsed: null,
+          file: new File(['b'], 'two.csv'),
+        },
+      ];
+
+      let previewCallCount = 0;
+      Parser.preview.mockImplementation(() => {
+        previewCallCount++;
+        if (previewCallCount === 1) {
+          return Promise.resolve({
+            sheets: [{
+              name: 'one',
+              data: [
+                ['Age', 'SKU'],
+                ['42', '00123'],
+                ['30', '00456'],
+              ],
+            }],
+            previewMeta: { rowCount: 3, colCount: 2, sheetCount: 1, sampled: false, sampleRows: 3, fileSize: 512 },
+          });
+        }
+        return Promise.resolve({
+          sheets: [{
+            name: 'two',
+            data: [
+              ['Age', 'SKU'],
+              ['25', '00789'],
+              ['35', '00321'],
+            ],
+          }],
+          previewMeta: { rowCount: 3, colCount: 2, sheetCount: 1, sampled: false, sampleRows: 3, fileSize: 512 },
+        });
+      });
+
+      let mergeCallCount = 0;
+      global.Merger.merge.mockImplementation((files) => {
+        mergeCallCount++;
+        // Simple merge: concatenate rows
+        const allData = [['Age', 'SKU']];
+        for (const file of files) {
+          const data = file.sheets[0].data.slice(1);
+          for (const row of data) allData.push(row);
+        }
+        return { sheets: [{ name: 'Merged', data: allData }], sourceMap: [] };
+      });
+
+      const options = app.getCleaningOptions();
+      const samplePreview = await app.getResponsiveMergePreview(options);
+      const sheet = samplePreview.merged.sheets[0];
+
+      const typeCtx = { cellMeta: sheet.cellMeta || null, sourceSampled: true };
+      app.renderPreviewTable(sheet.data, `Merged`, samplePreview.summary, [], null, typeCtx);
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      expect(indicators.length).toBe(2);
+
+      const types = [];
+      for (const th of indicators) {
+        const sr = th.querySelector('.sr-only');
+        types.push(sr.textContent.trim());
+      }
+
+      expect(types[0]).toMatch(/Number/);  // Age
+      expect(types[1]).toMatch(/Text/);    // SKU
+    });
+
+    test('fully empty column shows Empty type', () => {
+      const app = new DragToSheetsApp();
+      const data = [['A', 'Empty'], ['hello', ''], ['world', '']];
+
+      app.renderPreviewTable(data, 'test', { totalCols: 2, totalRows: 3 }, [], null, {});
+
+      const indicators = document.querySelectorAll('.col-type-indicator');
+      const types = [];
+      for (const th of indicators) {
+        const sr = th.querySelector('.sr-only');
+        types.push(sr.textContent.trim());
+      }
+
+      expect(types[0]).toMatch(/Text/);
+      expect(types[1]).toMatch(/Empty/);
     });
   });
 });
