@@ -2905,6 +2905,12 @@
         return s;
       };
 
+      // Non-destructive column type detection
+      let colTypes = [];
+      if (typeof TypeDetector !== 'undefined' && display.length > 0) {
+        colTypes = TypeDetector.detect(display, { maxCols: colCount });
+      }
+
       let html = '';
       if (notices && notices.length > 0) {
         html += '<div class="preview-notice">' + notices.map(n => this.escapeHtml(n)).join('<br>') + '</div>';
@@ -2921,6 +2927,20 @@
         }
         if (truncatedCols) html += '<th class="col-label">…</th>';
         html += '</tr>';
+
+        // Type profiling row
+        if (colTypes.length > 0) {
+          html += '<tr class="col-type-row">';
+          html += '<td class="gutter-corner"></td>';
+          for (let j = 0; j < colCount && j < colTypes.length; j++) {
+            const ct = colTypes[j];
+            const label = TypeDetector.labelFor(ct.type);
+            const title = TypeDetector.titleFor(ct.type, ct.sampled, ct.note || null);
+            html += `<td class="col-type-indicator" title="${this.escapeHtml(title)}">${this.escapeHtml(label)}</td>`;
+          }
+          if (truncatedCols) html += '<td class="col-type-indicator"></td>';
+          html += '</tr>';
+        }
 
         // Data header row (row 1 of the spreadsheet)
         html += '<tr>';
