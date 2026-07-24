@@ -2106,6 +2106,67 @@ describe('GoogleAPI', () => {
       expect(serial).toBeCloseTo(46085 + 7 / 24, 10);
       expect(updateCells[0].updateCells.rows[0].values[0].userEnteredFormat.numberFormat.type).toBe('DATE_TIME');
     });
+
+    test('native path rejects invalid offset +15:00 — no date update emitted', async () => {
+      global.fetch
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(sheetInfo('Sheet1', 3, 2)) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(valuesResp([['Name', 'Time'], ['Alice', '2026-03-04T12:30:00+15:00']])) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(gridData([
+          [cellS('Name'), cellS('Time')],
+          [cellS('Alice'), cellS('2026-03-04T12:30:00+15:00')],
+        ])) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(gridData([
+          [cellS('Name'), cellS('Time')],
+          [cellS('Alice'), cellS('2026-03-04T12:30:00+15:00')],
+        ])) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+
+      await GoogleAPI.cleanUploadedSheet('sheet-id', {
+        removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false,
+        trim: false, fixNumbers: false, normalizeDates: true, normalizeHeaders: false,
+      });
+
+      const batchCalls = global.fetch.mock.calls.filter(
+        (call) => call[0].includes(':batchUpdate')
+      );
+      const hasUpdateCells = batchCalls.some((call) => {
+        const body = JSON.parse(call[1].body);
+        return (body.requests || []).some((r) => r.updateCells);
+      });
+      expect(hasUpdateCells).toBe(false);
+    });
+
+    test('max valid offset +14:00 produces same serial in local and native paths', async () => {
+      const localToken = Cleaner.parseDateToken('2026-03-04T12:30:00+14:00');
+      expect(localToken).not.toBeNull();
+
+      global.fetch
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(sheetInfo('Sheet1', 3, 2)) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(valuesResp([['Name', 'Time'], ['Alice', '2026-03-04T12:30:00+14:00']])) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(gridData([
+          [cellS('Name'), cellS('Time')],
+          [cellS('Alice'), cellS('2026-03-04T12:30:00+14:00')],
+        ])) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(gridData([
+          [cellS('Name'), cellS('Time')],
+          [cellS('Alice'), cellS('2026-03-04T12:30:00+14:00')],
+        ])) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+
+      await GoogleAPI.cleanUploadedSheet('sheet-id', {
+        removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false,
+        trim: false, fixNumbers: false, normalizeDates: true, normalizeHeaders: false,
+      });
+
+      const batchCall = global.fetch.mock.calls.find(
+        (call) => call[0].includes(':batchUpdate')
+      );
+      expect(batchCall).toBeDefined();
+      const dateBody = JSON.parse(batchCall[1].body);
+      const updateCells = dateBody.requests.filter((r) => r.updateCells);
+      const nativeSerial = updateCells[0].updateCells.rows[0].values[0].userEnteredValue.numberValue;
+      expect(nativeSerial).toBeCloseTo(localToken.value, 10);
+    });
   });
 
   // ================================================================

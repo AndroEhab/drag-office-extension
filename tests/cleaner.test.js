@@ -1136,6 +1136,64 @@ describe('Cleaner', () => {
       });
     });
 
+    // ---- Timezone offset boundaries ----
+    describe('timezone offset boundaries', () => {
+      test('+00:00 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+00:00')).not.toBeNull();
+      });
+
+      test('-00:00 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00-00:00')).not.toBeNull();
+      });
+
+      test('+05:30 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+05:30')).not.toBeNull();
+      });
+
+      test('-04:00 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00-04:00')).not.toBeNull();
+      });
+
+      test('+13:59 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+13:59')).not.toBeNull();
+      });
+
+      test('-13:59 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00-13:59')).not.toBeNull();
+      });
+
+      test('+14:00 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+14:00')).not.toBeNull();
+      });
+
+      test('-14:00 accepted', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00-14:00')).not.toBeNull();
+      });
+
+      test('+14:01 rejected', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+14:01')).toBeNull();
+      });
+
+      test('-14:30 rejected', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00-14:30')).toBeNull();
+      });
+
+      test('+15:00 rejected', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+15:00')).toBeNull();
+      });
+
+      test('-23:59 rejected', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00-23:59')).toBeNull();
+      });
+
+      test('rejected offset remains string token locally', () => {
+        const data = [['col'], ['2026-03-04T12:30:00+15:00']];
+        const result = Cleaner.normalizeDates(data, null);
+        expect(result.cellMeta[1][0]).toEqual({ type: 'string', value: '2026-03-04T12:30:00+15:00' });
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+    });
+
     // ---- Formulas returning dates ----
     describe('formulas returning dates', () => {
       test('does NOT modify formula cells', () => {
@@ -1207,6 +1265,135 @@ describe('Cleaner', () => {
         const result = Cleaner.normalizeDates(data, null);
         expect(result.cellMeta[1][0]).toEqual({ type: 'boolean', value: true });
         expect(result.stats.datesNormalized).toBe(0);
+      });
+    });
+
+    // ---- Partial metadata ----
+    describe('partial metadata', () => {
+      test('metadata missing an entire data row does not throw', () => {
+        const data = [['col'], ['2026-03-04']];
+        const cellMeta = [[{ type: 'string', value: 'col' }]];
+        expect(() => Cleaner.normalizeDates(data, cellMeta)).not.toThrow();
+      });
+
+      test('a missing metadata row leaves date-looking cells unchanged', () => {
+        const data = [['col'], ['2026-03-04']];
+        const cellMeta = [[{ type: 'string', value: 'col' }]];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.stats.datesNormalized).toBe(0);
+        expect(result.cellMeta[1]).toEqual([]);
+      });
+
+      test('metadata row shorter than data row leaves unmatched cells unchanged', () => {
+        const data = [['a', 'b'], ['x', '2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }, { type: 'string', value: 'b' }],
+          [{ type: 'string', value: 'x' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('undefined token is not inferred as string', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [[{ type: 'string', value: 'a' }], [{ type: 'string', value: '2026-03-04' }]];
+        cellMeta[1][0] = undefined;
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('null token is not inferred as string', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [[{ type: 'string', value: 'a' }], [null]];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('explicitly typed string tokens are still normalized', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'string', value: '2026-03-04' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.stats.datesNormalized).toBe(1);
+      });
+
+      test('date token remains unchanged even though data looks like a date', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'date', value: 46000, formatType: 'DATE' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][0].type).toBe('date');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('number token remains unchanged', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'number', value: 42 }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][0].type).toBe('number');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('boolean token remains unchanged', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'boolean', value: true }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][0].type).toBe('boolean');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('TEXT-format token remains unchanged', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'string', value: '2026-03-04', formatType: 'TEXT' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][0].type).toBe('string');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('formula token remains unchanged', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'formula', value: '=TODAY()' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][0].type).toBe('formula');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('datesNormalized counts only explicit eligible string tokens', () => {
+        const data = [['a', 'b', 'c', 'd'], ['x', '2026-03-04', '2026-06-15', '2026-12-25']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }, { type: 'string', value: 'b' }, { type: 'string', value: 'c' }, { type: 'string', value: 'd' }],
+          [{ type: 'string', value: 'x' }, { type: 'number', value: 1 }, null, { type: 'string', value: '2026-12-25' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.stats.datesNormalized).toBe(1);
+        expect(result.cellMeta[1][3].type).toBe('date');
+      });
+
+      test('source metadata object remains unmodified', () => {
+        const data = [['a'], ['2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'a' }],
+          [{ type: 'string', value: '2026-03-04' }],
+        ];
+        const metaCopy = JSON.parse(JSON.stringify(cellMeta));
+        Cleaner.normalizeDates(data, cellMeta);
+        expect(cellMeta).toEqual(metaCopy);
       });
     });
 

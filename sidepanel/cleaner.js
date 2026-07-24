@@ -327,7 +327,9 @@ const Cleaner = (() => {
   function normalizeDates(data, meta) {
     const hasProvidedMeta = arguments.length >= 2 && meta != null;
     let newMeta = hasProvidedMeta
-      ? meta.map((row) => [...row])
+      ? data.map((row, ri) =>
+          Array.isArray(meta && meta[ri]) ? [...meta[ri]] : []
+        )
       : data.map((row) => row.map((v) => tokenFromValue(v)));
 
     let normalizedCount = 0;
@@ -337,16 +339,24 @@ const Cleaner = (() => {
       return row.map((cell, ci) => {
         if (typeof cell !== 'string') return cell;
 
-        const token = newMeta[ri] && newMeta[ri][ci];
-        if (hasProvidedMeta && token) {
-          if (token.type === 'formula' || token.type === 'date') return cell;
-          if (token.type !== 'string') return cell;
-          if (token.formatType === 'TEXT') return cell;
+        // Use original meta as the eligibility authority (not the copy).
+        // A missing row or token means "unknown — do not normalize."
+        const sourceToken = hasProvidedMeta
+          ? (Array.isArray(meta && meta[ri]) ? meta[ri][ci] : undefined)
+          : null;
+
+        if (hasProvidedMeta) {
+          if (!sourceToken) return cell;
+          if (sourceToken.type === 'formula' || sourceToken.type === 'date') return cell;
+          if (sourceToken.type !== 'string') return cell;
+          if (sourceToken.formatType === 'TEXT') return cell;
         }
 
         const dateToken = parseDateToken(cell);
         if (!dateToken) return cell;
 
+        // Only assign after confirming the destination row exists.
+        if (!newMeta[ri]) return cell;
         normalizedCount++;
         newMeta[ri][ci] = dateToken;
         return cell;
@@ -519,7 +529,17 @@ const Cleaner = (() => {
   }
 
   function isValidOffset(hours, minutes) {
-    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+    if (
+      !Number.isInteger(hours) ||
+      !Number.isInteger(minutes) ||
+      hours < 0 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      return false;
+    }
+    if (hours < 14) return true;
+    return hours === 14 && minutes === 0;
   }
 
   function addDays(year, monthIndex, day, days) {
