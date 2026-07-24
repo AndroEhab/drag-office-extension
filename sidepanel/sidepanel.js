@@ -1973,6 +1973,31 @@
         this.hidePreview();
       }
       this._updateSummaryCards();
+      this._updateButtonLabel();
+    }
+
+    /** Compute the primary action label based on file count and open mode. */
+    _getButtonLabel() {
+      const count = this.files.length;
+      if (count === 0) return 'Open in Sheets';
+      if (count === 1) return 'Open in Sheets';
+      if (this.getOpenMode() === 'merge') return 'Merge and open in Sheets';
+      return 'Open files in Sheets';
+    }
+
+    /** Update the upload button's visible text and aria-label, preserving the icon. */
+    _updateButtonLabel(label) {
+      if (!this.uploadBtn) return;
+      const text = label || this._getButtonLabel();
+      const icon = this.uploadBtn.querySelector('.app-icon');
+      if (icon) {
+        this.uploadBtn.textContent = '';
+        this.uploadBtn.appendChild(icon);
+        this.uploadBtn.appendChild(document.createTextNode(' ' + text));
+      } else {
+        this.uploadBtn.textContent = text;
+      }
+      this.uploadBtn.setAttribute('aria-label', text);
     }
 
     /** Rebuild the dropdown options from the current files array. */
@@ -3103,11 +3128,15 @@
       this.uploading = true;
       this.renderFileList();
       this.uploadBtn.disabled = true;
+
+      const mode = this.getOpenMode();
+      const inProgressLabel = (mode === 'merge' && this.files.length > 1) ? 'Merging\u2026' : 'Opening\u2026';
+      this._updateButtonLabel(inProgressLabel);
+
       this.showProgress(0);
 
       try {
         const options = this.getCleaningOptions();
-        const mode = this.getOpenMode();
         const shouldTightenGrid = options.removeEmptyRows || options.removeEmptyColumns;
         const apiContext = { responseCache: new Map(), tightGrid: shouldTightenGrid };
         const hasCleaning =
@@ -3308,6 +3337,7 @@
         this.uploading = false;
         this.renderFileList();
         this.uploadBtn.disabled = this.files.length === 0;
+        this._updateButtonLabel();
         this.hideProgress();
       }
     }
@@ -3327,6 +3357,7 @@
       this.uploading = true;
       this.renderFileList();
       this.uploadBtn.disabled = true;
+      this._updateButtonLabel('Opening\u2026');
       this.showProgress(0);
       let releasedParsedEntries = false;
 
@@ -3370,6 +3401,7 @@
         if (releasedParsedEntries) this.renderFileList();
         this.renderFileList();
         this.uploadBtn.disabled = this.files.length === 0;
+        this._updateButtonLabel();
         this.hideProgress();
       }
     }

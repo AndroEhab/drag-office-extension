@@ -428,6 +428,186 @@ describe('DragToSheetsApp', () => {
     });
   });
 
+  // ---- primary action button label ----
+
+  describe('primary action button label', () => {
+    test('defaults to "Open in Sheets" with no files', async () => {
+      const app = await createApp();
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
+
+    test('shows "Open in Sheets" for a single file', async () => {
+      const app = await createApp();
+      app.files = [{ name: 'test.csv', ext: 'csv' }];
+      app.updateUI();
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
+
+    test('shows "Open files in Sheets" for multiple files in separate mode', async () => {
+      const app = await createApp();
+      app.files = [{ name: 'a.csv', ext: 'csv' }, { name: 'b.csv', ext: 'csv' }];
+      app.updateUI();
+      expect(app.uploadBtn.textContent).toBe('Open files in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open files in Sheets');
+    });
+
+    test('shows "Merge and open in Sheets" for multiple files in merge mode', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.files = [{ name: 'a.csv', ext: 'csv' }, { name: 'b.csv', ext: 'csv' }];
+      app.updateUI();
+      expect(app.uploadBtn.textContent).toBe('Merge and open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Merge and open in Sheets');
+    });
+
+    test('shows "Opening\u2026" during separate-mode handleUpload', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'),
+        parsed: null, name: 'f.csv', ext: 'csv', size: 1024,
+        stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      const uploadPromise = app.handleUpload();
+
+      expect(app.uploadBtn.textContent).toBe('Opening\u2026');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Opening\u2026');
+
+      await uploadPromise;
+    });
+
+    test('shows "Merging\u2026" during merge-mode handleUpload', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      const fileA = new File(['a'], 'a.csv');
+      const fileB = new File(['b'], 'b.csv');
+      app.files = [
+        { file: fileA, parsed: { sheets: [{ name: 'A', data: [['X']] }] }, name: 'a.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'a.csv::csv::1024::0', lazy: false },
+        { file: fileB, parsed: { sheets: [{ name: 'B', data: [['Y']] }] }, name: 'b.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'b.csv::csv::1024::1', lazy: false },
+      ];
+      app.updateUI();
+
+      const uploadPromise = app.handleUpload();
+
+      expect(app.uploadBtn.textContent).toBe('Merging\u2026');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Merging\u2026');
+
+      await uploadPromise;
+    });
+
+    test('shows "Opening\u2026" during uploadSingleFromList', async () => {
+      const app = await createApp();
+      app.files = [
+        { file: new File(['a'], 'a.csv'), parsed: null, name: 'a.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'a.csv::csv::1024::0', lazy: true },
+      ];
+      app.updateUI();
+
+      const uploadPromise = app.uploadSingleFromList(0);
+
+      expect(app.uploadBtn.textContent).toBe('Opening\u2026');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Opening\u2026');
+
+      await uploadPromise;
+    });
+
+    test('restores label after successful handleUpload', async () => {
+      const app = await createApp();
+      const file = new File(['a'], 'f.csv');
+      app.files = [{
+        file, parsed: null, name: 'f.csv', ext: 'csv', size: 1024,
+        stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      await app.handleUpload();
+
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
+
+    test('restores label after successful merge upload', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      const fileA = new File(['a'], 'a.csv');
+      const fileB = new File(['b'], 'b.csv');
+      app.files = [
+        { file: fileA, parsed: { sheets: [{ name: 'A', data: [['X']] }] }, name: 'a.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'a.csv::csv::1024::0', lazy: false },
+        { file: fileB, parsed: { sheets: [{ name: 'B', data: [['Y']] }] }, name: 'b.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'b.csv::csv::1024::1', lazy: false },
+      ];
+      app.updateUI();
+
+      await app.handleUpload();
+
+      expect(app.uploadBtn.textContent).toBe('Merge and open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Merge and open in Sheets');
+    });
+
+    test('restores label after handleUpload error', async () => {
+      const app = await createApp();
+      const file = new File(['a'], 'f.csv');
+      app.files = [{
+        file, parsed: null, name: 'f.csv', ext: 'csv', size: 1024,
+        stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+      GoogleAPI.uploadFileToDrive.mockRejectedValueOnce(new Error('Network error'));
+
+      await app.handleUpload();
+
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
+
+    test('restores label after uploadSingleFromList error', async () => {
+      const app = await createApp();
+      app.files = [
+        { file: new File(['x'], 'bad.csv'), parsed: null, name: 'bad.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'bad.csv::csv::1024::0', lazy: true },
+      ];
+      app.updateUI();
+      GoogleAPI.uploadFileToDrive.mockRejectedValueOnce(new Error('boom'));
+
+      await app.uploadSingleFromList(0);
+
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
+
+    test('preserves upload button disabled state during and after separate upload', async () => {
+      const app = await createApp();
+      const file = new File(['a'], 'f.csv');
+      app.files = [{
+        file, parsed: null, name: 'f.csv', ext: 'csv', size: 1024,
+        stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+      expect(app.uploadBtn.disabled).toBe(false);
+
+      const uploadPromise = app.handleUpload();
+      expect(app.uploadBtn.disabled).toBe(true);
+      await uploadPromise;
+      expect(app.uploadBtn.disabled).toBe(false);
+    });
+
+    test('restores correct label after single-file upload when files remain', async () => {
+      const app = await createApp();
+      app.files = [
+        { file: new File(['a'], 'a.csv'), parsed: null, name: 'a.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'a.csv::csv::1024::0', lazy: true },
+        { file: new File(['b'], 'b.csv'), parsed: null, name: 'b.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'b.csv::csv::1024::1', lazy: true },
+      ];
+      app.updateUI();
+
+      expect(app.uploadBtn.textContent).toBe('Open files in Sheets');
+
+      await app.uploadSingleFromList(0);
+
+      expect(app.uploadBtn.textContent).toBe('Open files in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open files in Sheets');
+    });
+  });
+
   // ---- dataset summary cards ----
 
   describe('dataset summary', () => {
