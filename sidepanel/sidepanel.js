@@ -1559,6 +1559,7 @@
             removeEmptyColumns: 'opt-empty-cols',
             removeDuplicates: 'opt-duplicates',
             fixNumbers: 'opt-numbers',
+            normalizeDates: 'opt-dates',
             normalizeHeaders: 'opt-headers',
           };
           const opts = prefs.cleaningOptions || {};

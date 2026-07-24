@@ -544,7 +544,7 @@ const GoogleAPI = (() => {
     async function cleanUploadedSheet(spreadsheetId, options, context) {
     const info = await getSpreadsheetInfo(spreadsheetId, context);
     const hasStructural = options.removeEmptyRows || options.removeEmptyColumns || options.removeDuplicates;
-    const hasValueLevel = options.trim || options.fixNumbers || options.normalizeHeaders;
+    const hasValueLevel = options.trim || options.fixNumbers || options.normalizeDates || options.normalizeHeaders;
 
     for (const gs of info.sheets) {
       const sheetId = gs.properties.sheetId;
@@ -680,6 +680,7 @@ const GoogleAPI = (() => {
 
       const stringUpdates = [];
       const numberUpdates = [];
+      const dateUpdateRequests = [];
 
       for (let r = 0; r < valueRowData.length; r++) {
         const cells = valueRowData[r]?.values || [];
@@ -698,6 +699,7 @@ const GoogleAPI = (() => {
           let cur = raw;
           let changed = false;
           let valueIsNumber = false;
+          let valueIsDate = false;
           const isTextFormatted = token.formatType === 'TEXT';
 
           if (options.normalizeHeaders && r === 0) {
@@ -720,16 +722,43 @@ const GoogleAPI = (() => {
               }
             }
           }
+          if (options.normalizeDates && r > 0 && !isTextFormatted && !valueIsNumber) {
+            const dateToken = typeof Cleaner !== 'undefined' && Cleaner.parseDateToken
+              ? Cleaner.parseDateToken(cur)
+              : null;
+            if (dateToken) {
+              const fmtType = dateToken.formatType;
+              const patterns = { DATE: 'yyyy-mm-dd', TIME: 'hh:mm:ss', DATE_TIME: 'yyyy-mm-dd hh:mm:ss' };
+              dateUpdateRequests.push({
+                updateCells: {
+                  rows: [{
+                    values: [{
+                      userEnteredValue: { numberValue: dateToken.value },
+                      userEnteredFormat: {
+                        numberFormat: { type: fmtType, pattern: patterns[fmtType] || patterns.DATE },
+                      },
+                    }],
+                  }],
+                  fields: 'userEnteredValue,userEnteredFormat.numberFormat',
+                  range: { sheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: c, endColumnIndex: c + 1 },
+                },
+              });
+              valueIsDate = true;
+            }
+          }
 
-          if (changed) {
-            if (valueIsNumber) numberUpdates.push({ range: cellRef, values: [[cur]] });
-            else stringUpdates.push({ range: cellRef, values: [[cur]] });
+          if ((changed || valueIsDate) && !valueIsNumber && !valueIsDate) {
+            stringUpdates.push({ range: cellRef, values: [[cur]] });
+          }
+          if (valueIsNumber) {
+            numberUpdates.push({ range: cellRef, values: [[cur]] });
           }
         }
       }
 
       if (stringUpdates.length > 0) await sendValueRanges(spreadsheetId, stringUpdates, 'RAW', context);
       if (numberUpdates.length > 0) await sendValueRanges(spreadsheetId, numberUpdates, 'USER_ENTERED', context);
+      if (dateUpdateRequests.length > 0) await sendBatchUpdateRequests(spreadsheetId, dateUpdateRequests, context);
     }
   }
 

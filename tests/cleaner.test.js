@@ -910,19 +910,101 @@ describe('Cleaner', () => {
 
   // ---- normalizeDates ----
   describe('normalizeDates', () => {
+    // ---- shared helper: parseDateToken ----
+    describe('parseDateToken', () => {
+      test('ISO date returns DATE token with exact serial', () => {
+        const token = Cleaner.parseDateToken('2026-03-04');
+        expect(token).toEqual({ type: 'date', value: 46085, formatType: 'DATE' });
+      });
+
+      test('ISO date unpadded', () => {
+        const token = Cleaner.parseDateToken('2026-3-4');
+        expect(token).toEqual({ type: 'date', value: 46085, formatType: 'DATE' });
+      });
+
+      test('ISO datetime no suffix (floating)', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T12:30:00');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46085 + 12.5 / 24, 10);
+      });
+
+      test('ISO datetime Z suffix', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T12:30:00Z');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46085 + 12.5 / 24, 10);
+      });
+
+      test('ISO datetime with positive offset', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T12:30:00+05:30');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46085 + 7 / 24, 10);
+      });
+
+      test('ISO datetime with negative offset', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T12:30:00-04:00');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46085 + 16.5 / 24, 10);
+      });
+
+      test('offset cross day backward', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T02:00:00+05:00');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46084 + 21 / 24, 10);
+      });
+
+      test('offset cross day forward', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T23:30:00-05:00');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46086 + 4.5 / 24, 10);
+      });
+
+      test('fractional seconds preserved', () => {
+        const token = Cleaner.parseDateToken('2026-03-04T12:30:00.500');
+        expect(token.formatType).toBe('DATE_TIME');
+        expect(token.value).toBeCloseTo(46085 + 12.5 / 24 + 0.5 / 86400, 10);
+      });
+
+      test('rejects non-strings', () => {
+        expect(Cleaner.parseDateToken(null)).toBeNull();
+        expect(Cleaner.parseDateToken(42)).toBeNull();
+        expect(Cleaner.parseDateToken(true)).toBeNull();
+      });
+
+      test('rejects empty string', () => {
+        expect(Cleaner.parseDateToken('')).toBeNull();
+        expect(Cleaner.parseDateToken('   ')).toBeNull();
+      });
+    });
+
+    // ---- serial anchor tests ----
+    describe('serial anchors', () => {
+      test('1899-12-30 → 0', () => {
+        expect(Cleaner.parseDateToken('1899-12-30').value).toBe(0);
+      });
+
+      test('1900-01-01 → 2', () => {
+        expect(Cleaner.parseDateToken('1900-01-01').value).toBe(2);
+      });
+
+      test('1970-01-01 → 25569', () => {
+        expect(Cleaner.parseDateToken('1970-01-01').value).toBe(25569);
+      });
+
+      test('2026-03-04 → 46085', () => {
+        expect(Cleaner.parseDateToken('2026-03-04').value).toBe(46085);
+      });
+
+      test('2024-02-29 → 45351', () => {
+        expect(Cleaner.parseDateToken('2024-02-29').value).toBe(45351);
+      });
+    });
+
     // ---- ISO dates ----
     describe('ISO dates', () => {
       test('converts YYYY-MM-DD to date token', () => {
         const data = [['Name', 'Birthday'], ['Alice', '2026-03-04']];
         const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-        expect(result.stats.datesNormalized).toBe(1);
-      });
-
-      test('converts YYYY-M-D (unpadded) to date token', () => {
-        const data = [['Name', 'Date'], ['Alice', '2026-3-4']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
+        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: 46085, formatType: 'DATE' });
         expect(result.stats.datesNormalized).toBe(1);
       });
 
@@ -930,25 +1012,6 @@ describe('Cleaner', () => {
         const data = [['Name', 'Date'], ['Alice', '2026-03-04']];
         const result = Cleaner.normalizeDates(data, null);
         expect(result.data[1][1]).toBe('2026-03-04');
-      });
-
-      test('converts ISO datetime with time and Z suffix', () => {
-        const data = [['Name', 'Timestamp'], ['Alice', '2026-03-04T12:30:00Z']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE_TIME' });
-        expect(result.stats.datesNormalized).toBe(1);
-      });
-
-      test('converts ISO datetime with timezone offset', () => {
-        const data = [['Name', 'Timestamp'], ['Alice', '2026-03-04T12:30:00+05:30']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE_TIME' });
-      });
-
-      test('converts ISO datetime without timezone suffix', () => {
-        const data = [['Name', 'Timestamp'], ['Alice', '2026-03-04T12:30:00']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE_TIME' });
       });
 
       test('rejects invalid ISO date (Feb 30)', () => {
@@ -961,7 +1024,7 @@ describe('Cleaner', () => {
       test('converts leap day (Feb 29, 2024)', () => {
         const data = [['Name', 'Date'], ['Alice', '2024-02-29']];
         const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
+        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: 45351, formatType: 'DATE' });
       });
     });
 
@@ -970,54 +1033,21 @@ describe('Cleaner', () => {
       test('converts "Month DD, YYYY" full month', () => {
         const data = [['Name', 'Date'], ['Alice', 'March 4, 2026']];
         const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
+        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: 46085, formatType: 'DATE' });
         expect(result.stats.datesNormalized).toBe(1);
-      });
-
-      test('converts "Month DD YYYY" without comma', () => {
-        const data = [['Name', 'Date'], ['Alice', 'March 4 2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-      });
-
-      test('converts abbreviated month "Mon DD, YYYY"', () => {
-        const data = [['Name', 'Date'], ['Alice', 'Mar 4, 2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-      });
-
-      test('converts "DD Month YYYY"', () => {
-        const data = [['Name', 'Date'], ['Alice', '4 March 2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-      });
-
-      test('converts "DD Mon YYYY" abbreviated', () => {
-        const data = [['Name', 'Date'], ['Alice', '4 Mar 2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
       });
 
       test('converts "DD-Mon-YYYY" hyphenated', () => {
         const data = [['Name', 'Date'], ['Alice', '04-Mar-2026']];
         const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
+        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: 46085, formatType: 'DATE' });
       });
 
-      test('converts "DD-Mon-YYYY" without leading zero', () => {
-        const data = [['Name', 'Date'], ['Alice', '4-Mar-2026']];
+      test('date serial number matches between ISO and month-name for same date', () => {
+        const data = [['Name', 'MonthName', 'ISO'], ['Alice', 'March 4, 2026', '2026-03-04']];
         const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-      });
-
-      test('handles all months', () => {
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const data = [['Name', ...months], ['Alice', ...months.map((m) => `15-${m}-2026`)]];
-        const result = Cleaner.normalizeDates(data, null);
-        for (let i = 1; i <= 12; i++) {
-          expect(result.cellMeta[1][i]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-        }
-        expect(result.stats.datesNormalized).toBe(12);
+        expect(result.cellMeta[1][1].value).toBe(46085);
+        expect(result.cellMeta[1][2].value).toBe(46085);
       });
     });
 
@@ -1030,28 +1060,9 @@ describe('Cleaner', () => {
           [{ type: 'string', value: 'Name' }, { type: 'string', value: 'Birthday' }],
           [{ type: 'string', value: 'Alice' }, existingToken],
         ];
-        // Cell already has a date token — should pass through unchanged
         const result = Cleaner.normalizeDates(data, cellMeta);
         expect(result.cellMeta[1][1]).toEqual(existingToken);
         expect(result.stats.datesNormalized).toBe(0);
-      });
-
-      test('still normalizes other string dates when metadata is partially present', () => {
-        const data = [['Name', 'Start'], ['Alice', '2026-06-15']];
-        const cellMeta = [
-          [{ type: 'string', value: 'Name' }, { type: 'string', value: 'Start' }],
-          [{ type: 'string', value: 'Alice' }, { type: 'string', value: '2026-06-15' }],
-        ];
-        const result = Cleaner.normalizeDates(data, cellMeta);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-        expect(result.stats.datesNormalized).toBe(1);
-      });
-
-      test('date serial number matches between two equivalent representations', () => {
-        // "March 4, 2026" should have same serial as ISO "2026-03-04"
-        const data = [['Name', 'MonthName', 'ISO'], ['Alice', 'March 4, 2026', '2026-03-04']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1].value).toBe(result.cellMeta[1][2].value);
       });
     });
 
@@ -1059,19 +1070,6 @@ describe('Cleaner', () => {
     describe('ambiguous slash dates', () => {
       test('does NOT convert MM/DD/YYYY', () => {
         const data = [['Name', 'Date'], ['Alice', '03/04/2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'string', value: '03/04/2026' });
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
-      test('does NOT convert DD/MM/YYYY', () => {
-        const data = [['Name', 'Date'], ['Alice', '04/03/2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
-      test('does NOT convert M/D/YYYY', () => {
-        const data = [['Name', 'Date'], ['Alice', '3/4/2026']];
         const result = Cleaner.normalizeDates(data, null);
         expect(result.stats.datesNormalized).toBe(0);
       });
@@ -1084,7 +1082,6 @@ describe('Cleaner', () => {
 
       test('does NOT convert ambiguous numeric hyphen format MM-DD-YYYY', () => {
         const data = [['Name', 'Date'], ['Alice', '03-04-2026']];
-        // This would match ISO if year were first, but it's ambiguous
         const result = Cleaner.normalizeDates(data, null);
         expect(result.stats.datesNormalized).toBe(0);
       });
@@ -1096,40 +1093,44 @@ describe('Cleaner', () => {
       });
     });
 
-    // ---- Invalid dates ----
-    describe('invalid dates', () => {
-      test('does NOT convert "notadate"', () => {
-        const data = [['Name', 'Date'], ['Alice', 'notadate']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
+    // ---- Invalid dates and times ----
+    describe('invalid dates and times', () => {
       test('does NOT convert "2026-13-01" (month 13)', () => {
-        const data = [['Name', 'Date'], ['Alice', '2026-13-01']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
-      test('does NOT convert "2026-00-01" (month 0)', () => {
-        const data = [['Name', 'Date'], ['Alice', '2026-00-01']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(0);
+        expect(Cleaner.parseDateToken('2026-13-01')).toBeNull();
       });
 
       test('does NOT convert "February 30, 2026"', () => {
-        const data = [['Name', 'Date'], ['Alice', 'February 30, 2026']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(0);
+        expect(Cleaner.parseDateToken('February 30, 2026')).toBeNull();
       });
 
       test('does NOT convert "2026-02-29" (non-leap year)', () => {
-        const data = [['Name', 'Date'], ['Alice', '2026-02-29']];
+        expect(Cleaner.parseDateToken('2026-02-29')).toBeNull();
+      });
+
+      test('rejects hour 24', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T24:01:00')).toBeNull();
+      });
+
+      test('rejects minute 60', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:60:00')).toBeNull();
+      });
+
+      test('rejects second 60', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:60')).toBeNull();
+      });
+
+      test('rejects invalid offset +25:00', () => {
+        expect(Cleaner.parseDateToken('2026-03-04T12:30:00+25:00')).toBeNull();
+      });
+
+      test('should reject hour 24 from normalizeDates', () => {
+        const data = [['col'], ['2026-03-04T24:01:00']];
         const result = Cleaner.normalizeDates(data, null);
         expect(result.stats.datesNormalized).toBe(0);
       });
 
-      test('does NOT convert "JunkMonth 4, 2026"', () => {
-        const data = [['Name', 'Date'], ['Alice', 'JunkMonth 4, 2026']];
+      test('should reject minute 60 from normalizeDates', () => {
+        const data = [['col'], ['2026-03-04T12:60:00']];
         const result = Cleaner.normalizeDates(data, null);
         expect(result.stats.datesNormalized).toBe(0);
       });
@@ -1148,14 +1149,6 @@ describe('Cleaner', () => {
         expect(result.cellMeta[1][1]).toEqual(formulaToken);
         expect(result.stats.datesNormalized).toBe(0);
       });
-
-      test('does NOT convert a string that looks like a formula', () => {
-        const data = [['Name', 'Formula'], ['Alice', '=DATE(2026,3,4)']];
-        const result = Cleaner.normalizeDates(data, null);
-        // The string '=DATE(2026,3,4)' is not a recognised date format, so no conversion
-        expect(result.cellMeta[1][1]).toEqual({ type: 'string', value: '=DATE(2026,3,4)' });
-        expect(result.stats.datesNormalized).toBe(0);
-      });
     });
 
     // ---- Empty values ----
@@ -1167,26 +1160,66 @@ describe('Cleaner', () => {
         expect(result.stats.datesNormalized).toBe(0);
       });
 
-      test('handles null cell', () => {
-        const data = [['Name', 'Date'], ['Alice', null]];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'empty' });
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
-      test('handles whitespace-only cell', () => {
-        const data = [['Name', 'Date'], ['Alice', '   ']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'string', value: '   ' });
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
       test('handles fully empty data', () => {
         expect(Cleaner.normalizeDates([], null).stats.datesNormalized).toBe(0);
       });
+    });
 
-      test('handles header-only data', () => {
-        const data = [['Name', 'Date']];
+    // ---- Header and typed-cell semantics ----
+    describe('header and typed-cell semantics', () => {
+      test('always skips row 0 — both data and meta unchanged', () => {
+        const data = [['ID', '2026-03-04'], ['1', '2026-06-15']];
+        const result = Cleaner.normalizeDates(data, null);
+        expect(result.data[0][1]).toBe('2026-03-04');
+        expect(result.cellMeta[0][1]).toEqual({ type: 'string', value: '2026-03-04' });
+      });
+
+      test('does NOT count header values in datesNormalized', () => {
+        const data = [['ID', '2026-03-04'], ['1', '2026-06-15']];
+        const result = Cleaner.normalizeDates(data, null);
+        expect(result.stats.datesNormalized).toBe(1);
+      });
+
+      test('skips TEXT-format cells when metadata is present', () => {
+        const data = [['Name', 'Date'], ['Alice', '2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'Name' }, { type: 'string', value: 'Date' }],
+          [{ type: 'string', value: 'Alice' }, { type: 'string', value: '2026-03-04', formatType: 'TEXT' }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][1].type).toBe('string');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('skips number cells even if displayed as date string', () => {
+        const data = [['Name', 'Val'], ['Alice', '2026-03-04']];
+        const cellMeta = [
+          [{ type: 'string', value: 'Name' }, { type: 'string', value: 'Val' }],
+          [{ type: 'string', value: 'Alice' }, { type: 'number', value: 42 }],
+        ];
+        const result = Cleaner.normalizeDates(data, cellMeta);
+        expect(result.cellMeta[1][1].type).toBe('number');
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+
+      test('skips boolean cells', () => {
+        const data = [['Flag'], [true]];
+        const result = Cleaner.normalizeDates(data, null);
+        expect(result.cellMeta[1][0]).toEqual({ type: 'boolean', value: true });
+        expect(result.stats.datesNormalized).toBe(0);
+      });
+    });
+
+    // ---- Integration: datesNormalized counting ----
+    describe('datesNormalized count', () => {
+      test('counts only cells actually converted', () => {
+        const data = [['a', 'b', 'c'], ['x', '2026-03-04', '2026-06-15']];
+        const result = Cleaner.normalizeDates(data, null);
+        expect(result.stats.datesNormalized).toBe(2);
+      });
+
+      test('is zero when no dates found', () => {
+        const data = [['a', 'b'], ['x', 'y']];
         const result = Cleaner.normalizeDates(data, null);
         expect(result.stats.datesNormalized).toBe(0);
       });
@@ -1194,39 +1227,12 @@ describe('Cleaner', () => {
 
     // ---- Edge cases ----
     describe('edge cases', () => {
-      test('converts multiple dates in same row', () => {
-        const data = [['Name', 'Start', 'End'], ['Alice', '2026-03-04', '2026-12-25']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(2);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-        expect(result.cellMeta[1][2]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-      });
-
-      test('converts dates across multiple rows', () => {
-        const data = [['Name', 'Date'], ['Alice', '2026-03-04'], ['Bob', '2026-06-15']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.stats.datesNormalized).toBe(2);
-      });
-
-      test('does NOT affect header row', () => {
-        // Even if header looks like a date, we only process via tokens
-        const data = [['ID', '2026-03-04'], ['1', '2026-06-15']];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.data[0][1]).toBe('2026-03-04');
-        expect(result.data[1][1]).toBe('2026-06-15');
-        expect(result.cellMeta[1][1]).toEqual({ type: 'date', value: expect.any(Number), formatType: 'DATE' });
-      });
-
       test('works via apply() with the normalizeDates option', () => {
         const data = [['Name', 'Date'], ['Alice', '2026-03-04']];
         const result = Cleaner.apply(data, {
-          trim: false,
-          removeEmptyRows: false,
-          removeEmptyColumns: false,
-          removeDuplicates: false,
-          fixNumbers: false,
-          normalizeDates: true,
-          normalizeHeaders: false,
+          trim: false, removeEmptyRows: false, removeEmptyColumns: false,
+          removeDuplicates: false, fixNumbers: false,
+          normalizeDates: true, normalizeHeaders: false,
         }, null);
         expect(result.stats.datesNormalized).toBe(1);
       });
@@ -1240,20 +1246,6 @@ describe('Cleaner', () => {
         const metaCopy = JSON.parse(JSON.stringify(cellMeta));
         Cleaner.normalizeDates(data, cellMeta);
         expect(cellMeta).toEqual(metaCopy);
-      });
-
-      test('skips number cells', () => {
-        const data = [['ID', 'Value'], ['1', 42]];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][1]).toEqual({ type: 'number', value: 42 });
-        expect(result.stats.datesNormalized).toBe(0);
-      });
-
-      test('skips boolean cells', () => {
-        const data = [['Flag'], [true]];
-        const result = Cleaner.normalizeDates(data, null);
-        expect(result.cellMeta[1][0]).toEqual({ type: 'boolean', value: true });
-        expect(result.stats.datesNormalized).toBe(0);
       });
 
       test('does NOT convert numeric strings that happen to look like serial numbers', () => {

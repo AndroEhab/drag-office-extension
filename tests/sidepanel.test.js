@@ -1634,6 +1634,41 @@ describe('DragToSheetsApp', () => {
       expect(chrome.storage.session.set).not.toHaveBeenCalled();
       expect(app.previewPanel.classList.contains('hidden')).toBe(true);
     });
+
+    test('restores saved normalizeDates preference', async () => {
+      chrome.storage.session.get.mockResolvedValueOnce({
+        files: [],
+        sessionSummary: null,
+      });
+      chrome.storage.local.get.mockResolvedValueOnce({
+        prefs: {
+          openMode: 'separate',
+          cleaningOptions: { normalizeDates: true },
+        },
+      });
+
+      // createApp calls restoreSession → savePreferences; keep the mock valid
+      const app = await createApp();
+      const opts = app.getCleaningOptions();
+      expect(opts.normalizeDates).toBe(true);
+    });
+
+    test('restores saved normalizeDates false preference', async () => {
+      chrome.storage.session.get.mockResolvedValueOnce({
+        files: [],
+        sessionSummary: null,
+      });
+      chrome.storage.local.get.mockResolvedValueOnce({
+        prefs: {
+          openMode: 'separate',
+          cleaningOptions: { normalizeDates: false },
+        },
+      });
+
+      const app = await createApp();
+      const opts = app.getCleaningOptions();
+      expect(opts.normalizeDates).toBe(false);
+    });
   });
 
   // ---- getOpenMode ----
@@ -3576,6 +3611,50 @@ describe('DragToSheetsApp', () => {
       });
 
       expect(emptyEl.textContent).toBe('No changes detected in preview sample');
+    });
+
+    test('displays date count when normalizeDates was evaluated with non-zero datesNormalized', () => {
+      const app = new DragToSheetsApp();
+      const listEl = document.getElementById('cleanup-results-list');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 3, headersNormalized: 0 },
+        scope: 'exact',
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: true, normalizeHeaders: false },
+      });
+
+      const items = listEl.querySelectorAll('.cleanup-results-item');
+      expect(items).toHaveLength(1);
+      expect(items[0].textContent).toContain('3');
+      expect(items[0].textContent).toContain('dates');
+    });
+
+    test('hides date count when normalizeDates was NOT evaluated even if stats present', () => {
+      const app = new DragToSheetsApp();
+      const listEl = document.getElementById('cleanup-results-list');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 5, headersNormalized: 0 },
+        scope: 'exact',
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: false, normalizeHeaders: false },
+      });
+
+      const items = listEl.querySelectorAll('.cleanup-results-item');
+      expect(items).toHaveLength(0);
+    });
+
+    test('displays singular "date" for one normalized date', () => {
+      const app = new DragToSheetsApp();
+      const listEl = document.getElementById('cleanup-results-list');
+
+      app.renderCleanupSummary({
+        stats: { trimmedValues: 0, emptyRowsRemoved: 0, emptyColumnsRemoved: 0, duplicateRowsRemoved: 0, numericValuesCorrected: 0, datesNormalized: 1, headersNormalized: 0 },
+        scope: 'exact',
+        evaluatedOperations: { trim: false, removeEmptyRows: false, removeEmptyColumns: false, removeDuplicates: false, fixNumbers: false, normalizeDates: true, normalizeHeaders: false },
+      });
+
+      const items = listEl.querySelectorAll('.cleanup-results-item');
+      expect(items[0].textContent).toContain('1 date normalized');
     });
   });
 });

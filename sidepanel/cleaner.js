@@ -319,18 +319,8 @@ const Cleaner = (() => {
   /**
    * Convert unambiguous date strings to spreadsheet date values.
    *
-   * Recognised formats (conservative — no ambiguous numeric-only formats):
-   *   - ISO 8601:      2026-03-04  /  2026-3-4
-   *   - ISO datetime:  2026-03-04T12:30:00  /  with timezone suffix
-   *   - Month-name:    March 4, 2026  /  4 March 2026  /  Mar 4, 2026
-   *   - Hyphenated:    04-Mar-2026
-   *
-   * Rejected (ambiguous):
-   *   - All slash-separated formats (03/04/2026)
-   *   - All dot-separated formats (03.04.2026)
-   *   - Numeric-only hyphen formats other than ISO (03-04-2026)
-   *
-   * Skips: formula tokens, existing date tokens, identifiers, numeric strings.
+   * Skips: row 0 (headers), formulas, existing date tokens, TEXT-format cells,
+   * non-string token types, numeric strings, and ambiguous numeric-only formats.
    *
    * @returns {{data: string[][], stats: Object}} or {{data: string[][], cellMeta: Object[][], stats: Object}}
    */
@@ -342,38 +332,76 @@ const Cleaner = (() => {
 
     let normalizedCount = 0;
 
-    const newData = data.map((row, ri) =>
-      row.map((cell, ci) => {
-        const token = newMeta[ri] && newMeta[ri][ci];
-
-        if (token && (token.type === 'formula' || token.type === 'date')) return cell;
+    const newData = data.map((row, ri) => {
+      if (ri === 0) return row;
+      return row.map((cell, ci) => {
         if (typeof cell !== 'string') return cell;
 
-        const trimmed = cell.trim();
-        if (trimmed === '') return cell;
+        const token = newMeta[ri] && newMeta[ri][ci];
+        if (hasProvidedMeta && token) {
+          if (token.type === 'formula' || token.type === 'date') return cell;
+          if (token.type !== 'string') return cell;
+          if (token.formatType === 'TEXT') return cell;
+        }
 
-        const parsed = parseDateString(trimmed);
-        if (!parsed) return cell;
-
-        const serial = dateToSheetsSerial(parsed);
-        if (serial == null) return cell;
+        const dateToken = parseDateToken(cell);
+        if (!dateToken) return cell;
 
         normalizedCount++;
-        newMeta[ri][ci] = {
-          type: 'date',
-          value: serial,
-          formatType: parsed.hasTime ? 'DATE_TIME' : 'DATE',
-        };
+        newMeta[ri][ci] = dateToken;
         return cell;
-      })
-    );
+      });
+    });
 
     const result = { data: newData, stats: { datesNormalized: normalizedCount } };
     result.cellMeta = newMeta;
     return result;
   }
 
-  // ---- Date parsing helpers ----
+  // ================================================================
+  //  Shared date-parsing helper — used by both local Cleaner and
+  //  Google-side cleanUploadedSheet so serials and semantics match.
+  // ================================================================
+
+  /**
+   * Attempt to parse a value as an unambiguous date string.
+   * Returns a date cell token `{ type: 'date', value: sheetsSerial, formatType }`
+   * or null when the value is not a recognised unambiguous date.
+   *
+   * Recognised formats (conservative):
+   *   - ISO date:       2026-03-04, 2026-3-4
+   *   - ISO datetime:   2026-03-04T12:30:00, 2026-03-04T12:30:00Z,
+   *                     2026-03-04T12:30:00+05:30, 2026-03-04T12:30:00.500
+   *   - Month-name:     March 4, 2026  /  4 March 2026  /  Mar 4, 2026
+   *   - Hyphenated:     04-Mar-2026
+   *
+   * Rejected:
+   *   - Slash/dot-separated numeric dates (03/04/2026, 03.04.2026)
+   *   - ISO-like with invalid clock components (24:01:00, 12:60:00)
+   *   - Invalid calendar dates (Feb 30)
+   *
+   * @param {*} value - raw cell value
+   * @returns {Object|null} date token or null
+   */
+  function parseDateToken(value) {
+    if (typeof value !== 'string') return null;
+    var trimmed = value.trim();
+    if (trimmed === '') return null;
+
+    var c = parseDateComponents(trimmed);
+    if (!c) return null;
+
+    var serial = dateComponentsToSerial(c);
+    if (serial == null) return null;
+
+    return {
+      type: 'date',
+      value: serial,
+      formatType: c.hasTime ? 'DATE_TIME' : 'DATE',
+    };
+  }
+
+  // ---- internal date helpers ----
 
   var MONTH_INDEX = {
     january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
@@ -383,16 +411,16 @@ const Cleaner = (() => {
   };
 
   var RE_ISO_DATE = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
-  var RE_ISO_DATETIME = /^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/;
+  var RE_ISO_DATETIME = /^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{2}):(\d{2}):(\d{2})(\.\d{1,3})?(Z|([+-])(\d{2}):(\d{2}))?$/;
   var RE_MONTH_DAY_YEAR = /^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})$/i;
   var RE_DAY_MONTH_YEAR = /^(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})$/i;
   var RE_DD_MON_YYYY = /^(\d{1,2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{4})$/i;
 
   /**
-   * Parse a date string into { year, monthIndex, day, hasTime, hours, minutes, seconds }.
-   * Returns null if the string is not a recognised unambiguous date or is an invalid calendar date.
+   * Parse a date string into a components object or null.
+   * @returns {{ y:number, mo:number, d:number, hasTime:boolean, h:number, mi:number, s:number, ms:number }|null}
    */
-  function parseDateString(str) {
+  function parseDateComponents(str) {
     // ISO datetime (must check before ISO date)
     var m = str.match(RE_ISO_DATETIME);
     if (m) {
@@ -402,8 +430,40 @@ const Cleaner = (() => {
       var h = parseInt(m[4], 10);
       var mi = parseInt(m[5], 10);
       var s = parseInt(m[6], 10);
+      var frac = m[7] || null;
+      var ms = 0;
+      if (frac) {
+        ms = Math.round(parseFloat(frac) * 1000);
+      }
+      var suffixZ = m[8] === 'Z';
+      var offsetSign = m[9] || null;
+      var offsetH = m[10] ? parseInt(m[10], 10) : 0;
+      var offsetM = m[11] ? parseInt(m[11], 10) : 0;
+
       if (!isValidCalendarDate(y, mo, d)) return null;
-      return { year: y, monthIndex: mo, day: d, hasTime: true, hours: h, minutes: mi, seconds: s };
+      if (!isValidTime(h, mi, s)) return null;
+      if (offsetSign && !isValidOffset(offsetH, offsetM)) return null;
+
+      if (offsetSign) {
+        var offsetMinutes = offsetH * 60 + offsetM;
+        if (offsetSign === '-') offsetMinutes = -offsetMinutes;
+        var totalMinutes = h * 60 + mi - offsetMinutes;
+        if (totalMinutes < 0) {
+          // Roll back one day
+          var prev = addDays(y, mo, d, -1);
+          y = prev.y; mo = prev.mo; d = prev.d;
+          totalMinutes += 24 * 60;
+        } else if (totalMinutes >= 24 * 60) {
+          // Roll forward one day
+          prev = addDays(y, mo, d, 1);
+          y = prev.y; mo = prev.mo; d = prev.d;
+          totalMinutes -= 24 * 60;
+        }
+        h = Math.floor(totalMinutes / 60);
+        mi = totalMinutes % 60;
+      }
+
+      return { y: y, mo: mo, d: d, hasTime: true, h: h, mi: mi, s: s, ms: ms };
     }
 
     // ISO date
@@ -413,70 +473,79 @@ const Cleaner = (() => {
       mo = parseInt(m[2], 10) - 1;
       d = parseInt(m[3], 10);
       if (!isValidCalendarDate(y, mo, d)) return null;
-      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+      return { y: y, mo: mo, d: d, hasTime: false, h: 0, mi: 0, s: 0, ms: 0 };
     }
 
-    // Month DD, YYYY  (e.g., "March 4, 2026")
+    // Month DD, YYYY
     m = str.match(RE_MONTH_DAY_YEAR);
     if (m) {
       mo = MONTH_INDEX[m[1].toLowerCase()];
       d = parseInt(m[2], 10);
       y = parseInt(m[3], 10);
       if (mo === undefined || !isValidCalendarDate(y, mo, d)) return null;
-      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+      return { y: y, mo: mo, d: d, hasTime: false, h: 0, mi: 0, s: 0, ms: 0 };
     }
 
-    // DD Month YYYY  (e.g., "4 March 2026")
+    // DD Month YYYY
     m = str.match(RE_DAY_MONTH_YEAR);
     if (m) {
       d = parseInt(m[1], 10);
       mo = MONTH_INDEX[m[2].toLowerCase()];
       y = parseInt(m[3], 10);
       if (mo === undefined || !isValidCalendarDate(y, mo, d)) return null;
-      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+      return { y: y, mo: mo, d: d, hasTime: false, h: 0, mi: 0, s: 0, ms: 0 };
     }
 
-    // DD-Mon-YYYY  (e.g., "04-Mar-2026")
+    // DD-Mon-YYYY
     m = str.match(RE_DD_MON_YYYY);
     if (m) {
       d = parseInt(m[1], 10);
       mo = MONTH_INDEX[m[2].toLowerCase()];
       y = parseInt(m[3], 10);
       if (mo === undefined || !isValidCalendarDate(y, mo, d)) return null;
-      return { year: y, monthIndex: mo, day: d, hasTime: false, hours: 0, minutes: 0, seconds: 0 };
+      return { y: y, mo: mo, d: d, hasTime: false, h: 0, mi: 0, s: 0, ms: 0 };
     }
 
     return null;
   }
 
-  /**
-   * Returns true when year/month/day represent a real calendar date.
-   */
   function isValidCalendarDate(year, monthIndex, day) {
     var dt = new Date(Date.UTC(year, monthIndex, day));
     return dt.getUTCFullYear() === year && dt.getUTCMonth() === monthIndex && dt.getUTCDate() === day;
   }
 
-  /**
-   * Convert parsed date components to a Google Sheets serial date number.
-   * Uses the 1900 date system with the leap-year-bug adjustment.
-   */
+  function isValidTime(hours, minutes, seconds) {
+    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59 && seconds >= 0 && seconds <= 59;
+  }
+
+  function isValidOffset(hours, minutes) {
+    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+  }
+
+  function addDays(year, monthIndex, day, days) {
+    var dt = new Date(Date.UTC(year, monthIndex, day));
+    dt.setUTCDate(dt.getUTCDate() + days);
+    return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth(), d: dt.getUTCDate() };
+  }
+
   var SHEETS_EPOCH_MS = Date.UTC(1899, 11, 30);
   var MS_PER_DAY = 86400000;
+  var MS_PER_SECOND = 1000;
+  var MS_PER_MINUTE = 60000;
+  var MS_PER_HOUR = 3600000;
 
-  function dateToSheetsSerial(parsed) {
-    var utcMs = Date.UTC(
-      parsed.year,
-      parsed.monthIndex,
-      parsed.day,
-      parsed.hours || 0,
-      parsed.minutes || 0,
-      parsed.seconds || 0
-    );
-    var serial = (utcMs - SHEETS_EPOCH_MS) / MS_PER_DAY;
-    if (serial >= 60) serial += 1;
-    if (!isFinite(serial)) return null;
-    return serial;
+  /**
+   * Convert parsed date components to a Google Sheets serial number
+   * using the 1900 date system (epoch = 1899-12-30 UTC).
+   */
+  function dateComponentsToSerial(c) {
+    var dateMs = Date.UTC(c.y, c.mo, c.d, 0, 0, 0, 0);
+    var dateSerial = (dateMs - SHEETS_EPOCH_MS) / MS_PER_DAY;
+
+    if (!c.hasTime) return dateSerial;
+
+    var timeFraction = (c.h * MS_PER_HOUR + c.mi * MS_PER_MINUTE + c.s * MS_PER_SECOND + c.ms) / MS_PER_DAY;
+    return dateSerial + timeFraction;
   }
 
   /**
@@ -623,6 +692,7 @@ const Cleaner = (() => {
     removeAbsoluteDuplicates,
     fixNumberFormatting,
     normalizeDates,
+    parseDateToken,
     normalizeHeaders,
     getStats,
     emptyStats,
