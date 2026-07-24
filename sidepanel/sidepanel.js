@@ -44,6 +44,7 @@
       this.workerTaskId = 0;
       this.workerPending = new Map();
       this.previewTaskId = 0;
+      this.primaryActionOperation = null;
       this.init();
     }
 
@@ -1131,6 +1132,7 @@
           this.schedulePreviewRefresh();
           this.savePreferences();
           this._updateSummaryCards();
+          this._updatePrimaryAction();
         });
       });
 
@@ -1963,8 +1965,8 @@
       const hasFiles = this.files.length > 0;
       // options-panel is always visible so the gear button works without files
       this.mergeOption.classList.toggle('hidden', this.files.length < 2);
-      this.uploadBtn.disabled = !hasFiles;
       this.clearBtn.disabled = !hasFiles;
+      this._updatePrimaryAction();
       this.populatePreviewSelect();
       this.updateOpenModeState();
       if (hasFiles) {
@@ -1973,7 +1975,6 @@
         this.hidePreview();
       }
       this._updateSummaryCards();
-      this._updateButtonLabel();
     }
 
     /** Compute the primary action label based on file count and open mode. */
@@ -1985,10 +1986,9 @@
       return 'Open files in Sheets';
     }
 
-    /** Update the upload button's visible text and aria-label, preserving the icon. */
-    _updateButtonLabel(label) {
+    /** Set the button's visible text and aria-label, preserving the icon. */
+    _setButtonLabel(text) {
       if (!this.uploadBtn) return;
-      const text = label || this._getButtonLabel();
       const icon = this.uploadBtn.querySelector('.app-icon');
       if (icon) {
         this.uploadBtn.textContent = '';
@@ -1998,6 +1998,20 @@
         this.uploadBtn.textContent = text;
       }
       this.uploadBtn.setAttribute('aria-label', text);
+    }
+
+    /** Centralised primary-action update: derives label + disabled from current state. */
+    _updatePrimaryAction() {
+      if (!this.uploadBtn) return;
+      const inProgress = this.uploading;
+      let label;
+      if (inProgress) {
+        label = this.primaryActionOperation === 'merge' ? 'Merging\u2026' : 'Opening\u2026';
+      } else {
+        label = this._getButtonLabel();
+      }
+      this.uploadBtn.disabled = inProgress || this.files.length === 0;
+      this._setButtonLabel(label);
     }
 
     /** Rebuild the dropdown options from the current files array. */
@@ -3127,11 +3141,10 @@
       const uploadStart = this.now();
       this.uploading = true;
       this.renderFileList();
-      this.uploadBtn.disabled = true;
 
       const mode = this.getOpenMode();
-      const inProgressLabel = (mode === 'merge' && this.files.length > 1) ? 'Merging\u2026' : 'Opening\u2026';
-      this._updateButtonLabel(inProgressLabel);
+      this.primaryActionOperation = mode === 'merge' && this.files.length > 1 ? 'merge' : 'open';
+      this._updatePrimaryAction();
 
       this.showProgress(0);
 
@@ -3335,9 +3348,9 @@
         this.setStatus(`Upload failed: ${err.message}`, 'error');
       } finally {
         this.uploading = false;
+        this.primaryActionOperation = null;
         this.renderFileList();
-        this.uploadBtn.disabled = this.files.length === 0;
-        this._updateButtonLabel();
+        this._updatePrimaryAction();
         this.hideProgress();
       }
     }
@@ -3356,8 +3369,8 @@
       const uploadStart = this.now();
       this.uploading = true;
       this.renderFileList();
-      this.uploadBtn.disabled = true;
-      this._updateButtonLabel('Opening\u2026');
+      this.primaryActionOperation = 'open';
+      this._updatePrimaryAction();
       this.showProgress(0);
       let releasedParsedEntries = false;
 
@@ -3398,10 +3411,10 @@
         this.setStatus(`Upload failed: ${err.message}`, 'error');
       } finally {
         this.uploading = false;
+        this.primaryActionOperation = null;
         if (releasedParsedEntries) this.renderFileList();
         this.renderFileList();
-        this.uploadBtn.disabled = this.files.length === 0;
-        this._updateButtonLabel();
+        this._updatePrimaryAction();
         this.hideProgress();
       }
     }

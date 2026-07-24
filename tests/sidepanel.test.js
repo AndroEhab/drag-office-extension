@@ -606,6 +606,331 @@ describe('DragToSheetsApp', () => {
       expect(app.uploadBtn.textContent).toBe('Open files in Sheets');
       expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open files in Sheets');
     });
+
+    // ---- DOM-event transition tests ----
+
+    test('switching Separate -> Merge updates label immediately for two files', async () => {
+      const app = await createApp();
+      app.files = [{ name: 'a.csv', ext: 'csv' }, { name: 'b.csv', ext: 'csv' }];
+      app.updateUI();
+      expect(app.uploadBtn.textContent).toBe('Open files in Sheets');
+
+      document.querySelector('input[name="open-mode"][value="merge"]').click();
+
+      expect(app.uploadBtn.textContent).toBe('Merge and open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Merge and open in Sheets');
+    });
+
+    test('switching Merge -> Separate updates label immediately for two files', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.files = [{ name: 'a.csv', ext: 'csv' }, { name: 'b.csv', ext: 'csv' }];
+      app.updateUI();
+      expect(app.uploadBtn.textContent).toBe('Merge and open in Sheets');
+
+      document.querySelector('input[name="open-mode"][value="separate"]').click();
+
+      expect(app.uploadBtn.textContent).toBe('Open files in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open files in Sheets');
+    });
+
+    test('single file remains "Open in Sheets" across mode changes', async () => {
+      const app = await createApp();
+      app.files = [{ name: 'a.csv', ext: 'csv' }];
+      app.updateUI();
+
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+
+      document.querySelector('input[name="open-mode"][value="merge"]').click();
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+
+      document.querySelector('input[name="open-mode"][value="separate"]').click();
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+    });
+
+    test('visible text and aria-label change together on mode switch', async () => {
+      const app = await createApp();
+      app.files = [{ name: 'a.csv', ext: 'csv' }, { name: 'b.csv', ext: 'csv' }];
+      app.updateUI();
+
+      document.querySelector('input[name="open-mode"][value="merge"]').click();
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe(app.uploadBtn.textContent);
+
+      document.querySelector('input[name="open-mode"][value="separate"]').click();
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe(app.uploadBtn.textContent);
+    });
+
+    // ---- Pending-operation tests (deferred promise) ----
+
+    test('updateUI() during Opening keeps "Opening…"', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.uploadFileToDrive.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        app.updateUI();
+        expect(app.uploadBtn.textContent).toBe('Opening\u2026');
+        expect(app.uploadBtn.getAttribute('aria-label')).toBe('Opening\u2026');
+
+        resolveUpload({ id: 'd', url: 'https://sheets.google.com/d/d' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.uploadFileToDrive.mockReset();
+        GoogleAPI.uploadFileToDrive.mockResolvedValue({ id: 'drive-456', url: 'https://docs.google.com/spreadsheets/d/drive-456/edit' });
+      }
+    });
+
+    test('updateUI() during Merging keeps "Merging…"', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      const fileA = new File(['a'], 'a.csv');
+      const fileB = new File(['b'], 'b.csv');
+      app.files = [
+        { file: fileA, parsed: { sheets: [{ name: 'A', data: [['X']] }] }, name: 'a.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'a.csv::csv::1024::0', lazy: false },
+        { file: fileB, parsed: { sheets: [{ name: 'B', data: [['Y']] }] }, name: 'b.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'b.csv::csv::1024::1', lazy: false },
+      ];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.createSpreadsheet.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        app.updateUI();
+        expect(app.uploadBtn.textContent).toBe('Merging\u2026');
+
+        resolveUpload({ id: 's', url: 'https://sheets.google.com/d/s' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.createSpreadsheet.mockReset();
+        GoogleAPI.createSpreadsheet.mockResolvedValue({ id: 'sheet-123', url: 'https://docs.google.com/spreadsheets/d/sheet-123/edit' });
+      }
+    });
+
+    test('button remains disabled after updateUI() during either operation', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.uploadFileToDrive.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        app.updateUI();
+        expect(app.uploadBtn.disabled).toBe(true);
+
+        resolveUpload({ id: 'd', url: 'https://sheets.google.com/d/d' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.uploadFileToDrive.mockReset();
+        GoogleAPI.uploadFileToDrive.mockResolvedValue({ id: 'drive-456', url: 'https://docs.google.com/spreadsheets/d/drive-456/edit' });
+      }
+    });
+
+    test('switching mode during a pending merge keeps "Merging…"', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      const fileA = new File(['a'], 'a.csv');
+      const fileB = new File(['b'], 'b.csv');
+      app.files = [
+        { file: fileA, parsed: { sheets: [{ name: 'A', data: [['X']] }] }, name: 'a.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'a.csv::csv::1024::0', lazy: false },
+        { file: fileB, parsed: { sheets: [{ name: 'B', data: [['Y']] }] }, name: 'b.csv', ext: 'csv', size: 1024, stats: null, identityKey: 'b.csv::csv::1024::1', lazy: false },
+      ];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.createSpreadsheet.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        document.querySelector('input[name="open-mode"][value="separate"]').click();
+        expect(app.uploadBtn.textContent).toBe('Merging\u2026');
+
+        resolveUpload({ id: 's', url: 'https://sheets.google.com/d/s' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.createSpreadsheet.mockReset();
+        GoogleAPI.createSpreadsheet.mockResolvedValue({ id: 'sheet-123', url: 'https://docs.google.com/spreadsheets/d/sheet-123/edit' });
+      }
+    });
+
+    test('switching mode during a pending separate upload keeps "Opening…"', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.uploadFileToDrive.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        document.querySelector('input[name="open-mode"][value="merge"]').click();
+        expect(app.uploadBtn.textContent).toBe('Opening\u2026');
+
+        resolveUpload({ id: 'd', url: 'https://sheets.google.com/d/d' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.uploadFileToDrive.mockReset();
+        GoogleAPI.uploadFileToDrive.mockResolvedValue({ id: 'drive-456', url: 'https://docs.google.com/spreadsheets/d/drive-456/edit' });
+      }
+    });
+
+    test('adding a file during a pending operation does not replace the progress label', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.uploadFileToDrive.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        app.files.push({ name: 'g.csv', ext: 'csv' });
+        app.updateUI();
+        expect(app.uploadBtn.textContent).toBe('Opening\u2026');
+
+        resolveUpload({ id: 'd', url: 'https://sheets.google.com/d/d' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.uploadFileToDrive.mockReset();
+        GoogleAPI.uploadFileToDrive.mockResolvedValue({ id: 'drive-456', url: 'https://docs.google.com/spreadsheets/d/drive-456/edit' });
+      }
+    });
+
+    test('removing a file during a pending operation does not replace the progress label', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.uploadFileToDrive.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const uploadPromise = app.handleUpload();
+        await flushPromises();
+
+        app.files = [];
+        app.updateUI();
+        expect(app.uploadBtn.textContent).toBe('Opening\u2026');
+
+        resolveUpload({ id: 'd', url: 'https://sheets.google.com/d/d' });
+        await uploadPromise;
+      } finally {
+        GoogleAPI.uploadFileToDrive.mockReset();
+        GoogleAPI.uploadFileToDrive.mockResolvedValue({ id: 'drive-456', url: 'https://docs.google.com/spreadsheets/d/drive-456/edit' });
+      }
+    });
+
+    test('active-operation state is cleared in every finally path after success', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      await app.handleUpload();
+      expect(app.primaryActionOperation).toBeNull();
+    });
+
+    test('active-operation state is cleared in every finally path after error', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+      GoogleAPI.uploadFileToDrive.mockRejectedValueOnce(new Error('fail'));
+
+      await app.handleUpload();
+      expect(app.primaryActionOperation).toBeNull();
+    });
+
+    test('a second upload cannot start while the first is pending', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      let resolveUpload;
+      GoogleAPI.uploadFileToDrive.mockImplementation(() => new Promise(resolve => { resolveUpload = resolve; }));
+
+      try {
+        const first = app.handleUpload();
+        await flushPromises();
+
+        const second = app.handleUpload();
+        expect(GoogleAPI.uploadFileToDrive).toHaveBeenCalledTimes(1);
+
+        resolveUpload({ id: 'd', url: 'https://sheets.google.com/d/d' });
+        await first;
+        await second;
+      } finally {
+        GoogleAPI.uploadFileToDrive.mockReset();
+        GoogleAPI.uploadFileToDrive.mockResolvedValue({ id: 'drive-456', url: 'https://docs.google.com/spreadsheets/d/drive-456/edit' });
+      }
+    });
+
+    test('after success, the current idle label is restored', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+
+      await app.handleUpload();
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
+
+    test('after failure, the current idle label is restored', async () => {
+      const app = await createApp();
+      app.files = [{
+        file: new File(['a'], 'f.csv'), parsed: null, name: 'f.csv', ext: 'csv',
+        size: 1024, stats: null, identityKey: 'f.csv::csv::1024::0', lazy: true,
+      }];
+      app.updateUI();
+      GoogleAPI.uploadFileToDrive.mockRejectedValueOnce(new Error('fail'));
+
+      await app.handleUpload();
+      expect(app.uploadBtn.textContent).toBe('Open in Sheets');
+      expect(app.uploadBtn.getAttribute('aria-label')).toBe('Open in Sheets');
+    });
   });
 
   // ---- dataset summary cards ----
