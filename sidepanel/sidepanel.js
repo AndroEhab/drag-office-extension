@@ -91,9 +91,9 @@
     getEntryStats(item) {
       if (item?.stats) return item.stats;
       if (!item?.parsed) return null;
-      const stats = this.computeParsedStats(item.parsed);
-      item.stats = stats;
-      return stats;
+      item.stats = this.computeParsedStats(item.parsed);
+      delete item.summaryStats;
+      return item.stats;
     }
 
     getIncomingWorkloadHints(entries, options = this.getCleaningOptions()) {
@@ -1958,7 +1958,7 @@
       let hasAllStats = true;
 
       for (const file of this.files) {
-        const summary = file.stats || file.summaryStats;
+        const summary = file.stats || (file.parsed ? this.getEntryStats(file) : null) || file.summaryStats;
         if (!summary) {
           hasAllStats = false;
           continue;

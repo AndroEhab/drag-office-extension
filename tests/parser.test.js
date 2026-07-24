@@ -234,8 +234,38 @@ describe('Parser', () => {
       ]);
       expect(result.previewMeta.sampled).toBe(true);
       expect(result.previewMeta.rowCount).toBeNull();
+      expect(result.previewMeta.dataRowCount).toBeNull();
       expect(result.previewMeta.colCount).toBe(2);
     });
+
+    test('complete CSV preview returns exact row metrics', async () => {
+      const content = 'Header\nA\nB\nC';
+      const file = makeFile('small.csv', content);
+      Object.defineProperty(file, 'size', { value: content.length });
+
+      const result = await Parser.preview(file, { sampleRows: 51 });
+
+      expect(result.previewMeta.rowCount).toBe(4);
+      expect(result.previewMeta.dataRowCount).toBe(3);
+      expect(result.previewMeta.colCount).toBe(1);
+      expect(result.previewMeta.sampled).toBe(false);
+    });
+
+    test('truncated CSV preview returns null row metrics', async () => {
+      const rows = ['header'];
+      for (let i = 0; i < 100; i++) rows.push(`row${i}`);
+      const content = rows.join('\n');
+      const file = makeFile('big.csv', content);
+      Object.defineProperty(file, 'size', { value: 1024 * 1024 });
+
+      const result = await Parser.preview(file, { maxBytes: 64, sampleRows: 5 });
+
+      expect(result.previewMeta.rowCount).toBeNull();
+      expect(result.previewMeta.dataRowCount).toBeNull();
+      expect(result.previewMeta.sampled).toBe(true);
+    });
+
+
   });
 
   // ---- Delimiter auto-detection ----
@@ -569,6 +599,77 @@ describe('Parser', () => {
       const result = await Parser.parse(makeExcelFile('trailing.xlsx'));
 
       expect(result.sheets[0].data).toEqual([['A'], ['1']]);
+    });
+
+    test('multi-sheet Excel preview reports workbook-wide metrics from ranges', async () => {
+      global.XLSX.read.mockReturnValueOnce({
+        SheetNames: ['Sheet1', 'Sheet2'],
+        Sheets: {
+          Sheet1: {
+            '!ref': 'A1:C3',
+            'A1': { v: 'H1', t: 's' },
+            'B1': { v: 'H2', t: 's' },
+            'C1': { v: 'H3', t: 's' },
+            'A2': { v: 'v1', t: 's' },
+            'B2': { v: 'v2', t: 's' },
+            'A3': { v: 'v3', t: 's' },
+          },
+          Sheet2: {
+            '!ref': 'A1:B5',
+            'A1': { v: 'H', t: 's' },
+            'A2': { v: 'x', t: 's' },
+            'A3': { v: 'y', t: 's' },
+            'A4': { v: 'z', t: 's' },
+            'A5': { v: 'w', t: 's' },
+          },
+        },
+      });
+      global.XLSX.utils.sheet_to_json
+        .mockReturnValueOnce([
+          ['H1', 'H2', 'H3'],
+          ['v1', 'v2', ''],
+          ['v3', '', ''],
+        ])
+        .mockReturnValueOnce([
+          ['H'],
+          ['x'],
+          ['y'],
+          ['z'],
+          ['w'],
+        ]);
+      global.XLSX.utils.decode_range = jest.fn((ref) => {
+        if (ref === 'A1:C3') return { s: { r: 0, c: 0 }, e: { r: 2, c: 2 } };
+        if (ref === 'A1:B5') return { s: { r: 0, c: 0 }, e: { r: 4, c: 1 } };
+        return { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+      });
+
+      const result = await Parser.preview(makeExcelFile('multi.xlsx'), { sampleRows: 51 });
+
+      expect(result.previewMeta.sheetCount).toBe(2);
+      expect(result.previewMeta.rowCount).toBe(8);  // 3 + 5
+      expect(result.previewMeta.dataRowCount).toBe(6);  // (3-1)+(5-1)
+      expect(result.previewMeta.colCount).toBe(3);  // max(3, 2)
+      expect(result.previewMeta.sampled).toBe(true);  // sampled because totalRows (8) > sample data rows (3)
+    });
+
+    test('missing worksheet ranges produce unknown summary metrics', async () => {
+      global.XLSX.read.mockReturnValueOnce({
+        SheetNames: ['NoRef'],
+        Sheets: {
+          NoRef: {
+            'A1': { v: 'Alone', t: 's' },
+          },
+        },
+      });
+      global.XLSX.utils.sheet_to_json.mockReturnValueOnce([['Alone']]);
+      global.XLSX.utils.decode_range = jest.fn(() => ({ s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }));
+
+      const result = await Parser.preview(makeExcelFile('noref.xlsx'), { sampleRows: 51 });
+
+      expect(result.previewMeta.rowCount).toBeNull();
+      expect(result.previewMeta.dataRowCount).toBeNull();
+      expect(result.previewMeta.colCount).toBeNull();
+      expect(result.previewMeta.sheetCount).toBe(1);
     });
 
     test('throws when SheetJS is not loaded', async () => {

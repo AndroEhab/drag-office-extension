@@ -706,6 +706,118 @@ describe('DragToSheetsApp', () => {
       // getEntryStats should return null since there's no full stats
       expect(app.getEntryStats(app.files[0])).toBeNull();
     });
+
+    test('restored parsed entry with neither stats nor summaryStats derives complete stats', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'legacy.csv',
+        parsed: { sheets: [{ name: 'Sheet1', data: [['Header'], ['A'], ['B']] }] },
+        stats: null,
+        summaryStats: null,
+      }];
+      app._updateSummaryCards();
+      // getEntryStats should derive from parsed and delete summaryStats
+      expect(document.getElementById('summary-rows').textContent).toBe('2');
+      expect(document.getElementById('summary-cols').textContent).toBe('1');
+      const stats = app.getEntryStats(app.files[0]);
+      expect(stats).toBeTruthy();
+      expect(stats.dataRowCount).toBe(2);
+      expect(stats.colCount).toBe(1);
+      expect(stats.cellCount).toBe(3); // 3 rows × 1 col
+      expect(stats.styledCellCount).toBe(0);
+      expect(app.files[0].summaryStats).toBeUndefined();
+    });
+
+    test('parsed entry with stale summaryStats uses full stats and removes stale summary', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'stale.csv',
+        parsed: { sheets: [{ name: 'S1', data: [['h'], ['v1'], ['v2'], ['v3']] }] },
+        summaryStats: { sheetCount: 1, rowCount: 2, dataRowCount: 1, colCount: 9 },
+      }];
+      app._updateSummaryCards();
+      // Should use getEntryStats which derives from parsed data (4 rows, 1 col)
+      expect(document.getElementById('summary-rows').textContent).toBe('3');
+      expect(document.getElementById('summary-cols').textContent).toBe('1');
+      expect(app.files[0].stats).toBeTruthy();
+      expect(app.files[0].summaryStats).toBeUndefined();
+    });
+
+    test('unparsed preview-only entry continues using summaryStats without creating workload stats', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'prev.csv',
+        parsed: null,
+        lazy: true,
+        summaryStats: { sheetCount: 1, rowCount: 5, dataRowCount: 4, colCount: 3 },
+      }];
+      app._updateSummaryCards();
+      expect(document.getElementById('summary-rows').textContent).toBe('4');
+      expect(document.getElementById('summary-cols').textContent).toBe('3');
+      expect(app.getEntryStats(app.files[0])).toBeNull();
+      expect(app.files[0].summaryStats).toBeDefined();
+    });
+
+    test('saveFilesSession stores summaryStats separately from stats', async () => {
+      const app = await createApp();
+      chrome.storage.session.set.mockResolvedValue();
+      chrome.storage.local.set.mockResolvedValue();
+      app.files = [
+        { name: 'full.csv', parsed: { sheets: [{ name: 'S1', data: [['h'], ['v']] }] }, stats: { rowCount: 2, dataRowCount: 1, colCount: 1, cellCount: 2, styledCellCount: 0 } },
+        { name: 'prev.csv', parsed: null, lazy: true, summaryStats: { sheetCount: 1, rowCount: 5, dataRowCount: 4, colCount: 3 } },
+      ];
+      const serialized = app.files.map((item) => ({
+        name: item.name,
+        ext: item.ext,
+        size: 0,
+        stats: item.stats || null,
+        summaryStats: item.summaryStats || null,
+        identityKey: item.identityKey || null,
+        contentFingerprint: item.contentFingerprint || null,
+        lazy: Boolean(item.lazy && !item.parsed),
+        handleId: item.handleId || null,
+        sheets: null,
+      }));
+      expect(serialized[0].stats).toBeTruthy();
+      expect(serialized[0].summaryStats).toBeNull();
+      expect(serialized[1].stats).toBeNull();
+      expect(serialized[1].summaryStats).toEqual({ sheetCount: 1, rowCount: 5, dataRowCount: 4, colCount: 3 });
+    });
+
+    test('restored summaryStats renders cards and workload ignores it', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'restored.csv',
+        parsed: null,
+        summaryStats: { sheetCount: 1, rowCount: 4, dataRowCount: 3, colCount: 2 },
+      }];
+      app._updateSummaryCards();
+      expect(document.getElementById('summary-rows').textContent).toBe('3');
+      expect(document.getElementById('summary-cols').textContent).toBe('2');
+      const hints = app.getLoadedWorkloadHints();
+      expect(hints.totalCells).toBe(0);
+    });
+
+    test('full parsing after restoration removes summaryStats and creates complete stats', async () => {
+      const app = await createApp();
+      global.Parser.parse.mockResolvedValue({
+        sheets: [{ name: 'Sheet1', data: [['h1', 'h2'], ['v1', 'v2'], ['v3', 'v4'], ['v5', 'v6']] }],
+      });
+      app.files = [{
+        name: 'r.csv',
+        parsed: null,
+        lazy: true,
+        summaryStats: { sheetCount: 1, rowCount: 4, dataRowCount: 3, colCount: 9 },
+        file: new File(['h1,h2\nv1,v2\nv3,v4\nv5,v6'], 'r.csv', { type: 'text/csv' }),
+      }];
+      await app.ensureParsedEntry(app.files[0]);
+      expect(app.files[0].stats).toBeDefined();
+      expect(app.files[0].stats.dataRowCount).toBe(3);
+      expect(app.files[0].stats.colCount).toBe(2);
+      expect(app.files[0].summaryStats).toBeUndefined();
+      expect(document.getElementById('summary-rows').textContent).toBe('3');
+      expect(document.getElementById('summary-cols').textContent).toBe('2');
+    });
   });
 
   // ---- layout and accessibility regression tests ----
