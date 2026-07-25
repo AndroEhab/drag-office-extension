@@ -1209,28 +1209,9 @@
 
     // ---- URL Import ----
 
-    async requestUrlImportPermission() {
-      try {
-        const granted = await chrome.permissions.request({
-          origins: ['https://*/*', 'http://*/*'],
-        });
-        return granted;
-      } catch {
-        return false;
-      }
-    }
-
     async toggleUrlBar(forceOpen) {
       const isCurrentlyOpen = this.urlToggle.getAttribute('aria-expanded') === 'true';
       const open = forceOpen !== undefined ? forceOpen : !isCurrentlyOpen;
-
-      if (open && !isCurrentlyOpen) {
-        const hasPermission = await this.requestUrlImportPermission();
-        if (!hasPermission) {
-          this.setStatus('URL import requires permission to access external websites', 'warning');
-          return;
-        }
-      }
 
       this.urlBar.classList.toggle('hidden', !open);
       this.urlToggle.setAttribute('aria-expanded', String(open));
@@ -1249,13 +1230,34 @@
         url = new URL(raw);
       } catch {
         this.urlInput.classList.add('url-input--error');
-        this.setStatus('Enter a valid http(s) URL', 'warning');
+        this.setStatus('Enter a valid URL', 'warning');
         return;
       }
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      if (url.protocol !== 'https:') {
         this.urlInput.classList.add('url-input--error');
-        this.setStatus('Only http and https URLs are supported', 'warning');
+        this.setStatus('Only HTTPS URLs are supported', 'warning');
         return;
+      }
+
+      const originPattern = `${url.protocol}//${url.hostname}/*`;
+      let hasPermission;
+      try {
+        hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
+      } catch {
+        hasPermission = false;
+      }
+      if (!hasPermission) {
+        let granted;
+        try {
+          granted = await chrome.permissions.request({ origins: [originPattern] });
+        } catch {
+          granted = false;
+        }
+        if (!granted) {
+          this.urlInput.classList.add('url-input--error');
+          this.setStatus(`Permission denied for ${url.hostname}. Cannot fetch from this origin.`, 'warning');
+          return;
+        }
       }
 
       this.urlFetchBtn.disabled = true;

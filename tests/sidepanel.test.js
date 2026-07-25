@@ -3314,6 +3314,117 @@ describe('DragToSheetsApp', () => {
     });
   });
 
+  // ---- URL Import Permission Flow ----
+
+  describe('importFromUrl permission flow', () => {
+    beforeEach(() => {
+      chrome.permissions.contains.mockResolvedValue(false);
+      chrome.permissions.request.mockResolvedValue(true);
+    });
+
+    test('opening URL section does not request permission', async () => {
+      const app = await createApp();
+
+      await app.toggleUrlBar(true);
+
+      expect(app.urlBar.classList.contains('hidden')).toBe(false);
+      expect(chrome.permissions.request).not.toHaveBeenCalled();
+      expect(chrome.permissions.contains).not.toHaveBeenCalled();
+    });
+
+    test('invalid URL shows error', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'not a url';
+
+      await app.importFromUrl();
+
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.loadingText.textContent).toContain('Enter a valid URL');
+    });
+
+    test('HTTP URL is rejected', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'http://example.com/data.csv';
+
+      await app.importFromUrl();
+
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.loadingText.textContent).toContain('Only HTTPS URLs are supported');
+      expect(chrome.permissions.request).not.toHaveBeenCalled();
+    });
+
+    test('already-granted origin skips permission request', async () => {
+      chrome.permissions.contains.mockResolvedValue(true);
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+
+      // Prevent actual fetch
+      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
+
+      await app.importFromUrl();
+
+      expect(chrome.permissions.contains).toHaveBeenCalledWith({
+        origins: ['https://example.com/*'],
+      });
+      expect(chrome.permissions.request).not.toHaveBeenCalled();
+
+      delete global.fetch;
+    });
+
+    test('newly granted permission proceeds to fetch', async () => {
+      chrome.permissions.contains.mockResolvedValue(false);
+      chrome.permissions.request.mockResolvedValue(true);
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+
+      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
+
+      await app.importFromUrl();
+
+      expect(chrome.permissions.request).toHaveBeenCalledWith({
+        origins: ['https://example.com/*'],
+      });
+      expect(global.fetch).toHaveBeenCalled();
+
+      delete global.fetch;
+    });
+
+    test('permission denial shows warning and does not clear URL', async () => {
+      chrome.permissions.request.mockResolvedValue(false);
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+
+      global.fetch = jest.fn();
+
+      await app.importFromUrl();
+
+      expect(chrome.permissions.request).toHaveBeenCalledWith({
+        origins: ['https://example.com/*'],
+      });
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.loadingText.textContent).toContain('Permission denied');
+      expect(app.urlInput.value).toBe('https://example.com/data.csv');
+      expect(global.fetch).not.toHaveBeenCalled();
+
+      delete global.fetch;
+    });
+
+    test('fetch does not start before permission is approved', async () => {
+      chrome.permissions.contains.mockResolvedValue(false);
+      chrome.permissions.request.mockResolvedValue(false);
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+
+      global.fetch = jest.fn();
+
+      await app.importFromUrl();
+
+      expect(global.fetch).not.toHaveBeenCalled();
+
+      delete global.fetch;
+    });
+  });
+
   // ---- Merged CSV integration ----
 
   describe('merged CSV integration', () => {

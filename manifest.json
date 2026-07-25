@@ -18,7 +18,7 @@
     "https://accounts.google.com/*"
   ],
   "optional_host_permissions": [
-    "*://*/*"
+    "https://*/*"
   ],
   "icons": {
     "16": "images/logo-icon.png",

@@ -43,6 +43,7 @@ global.chrome = {
     create: jest.fn().mockResolvedValue({}),
   },
   permissions: {
+    contains: jest.fn().mockResolvedValue(false),
     request: jest.fn().mockResolvedValue(true),
   },
 };
