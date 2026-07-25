@@ -384,6 +384,37 @@ describe('Parser', () => {
       expect(result.sheets[0].data[1]).toEqual(['Alice', 30]);
     });
 
+    test('previews a requested worksheet while preserving the default first-sheet behavior', async () => {
+      global.XLSX.read.mockReturnValue({
+        SheetNames: ['First', 'Second'],
+        Sheets: {
+          First: { '!ref': 'A1:C4' },
+          Second: { '!ref': 'A1:B3' },
+        },
+      });
+      global.XLSX.utils.sheet_to_json.mockReturnValue([
+        ['Second-selected'],
+        ['x'],
+        ['y'],
+      ]);
+      global.XLSX.utils.decode_range = jest.fn((ref) => {
+        if (ref === 'A1:C4') return { s: { r: 0, c: 0 }, e: { r: 3, c: 2 } };
+        return { s: { r: 0, c: 0 }, e: { r: 2, c: 1 } };
+      });
+
+      const result = await Parser.preview(makeExcelFile('selected.xlsx'), {
+        sampleRows: 3,
+        sheetIndex: 1,
+      });
+
+      expect(result.sheets[0].name).toBe('Second');
+      expect(result.sheets[0].data[0]).toEqual(['Second-selected', '']);
+      expect(result.previewMeta.rowCount).toBe(3);
+      expect(result.previewMeta.dataRowCount).toBe(2);
+      expect(result.previewMeta.colCount).toBe(2);
+      expect(result.previewMeta.sheetCount).toBe(2);
+    });
+
     test('preserves sampled Excel metadata and cleaning semantics for typed cells', async () => {
       const formula = '=TEXT(1234,"0")';
       global.XLSX.read.mockReturnValue({

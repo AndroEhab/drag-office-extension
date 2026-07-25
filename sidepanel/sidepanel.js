@@ -46,6 +46,8 @@
       this.workerPending = new Map();
       this.previewTaskId = 0;
       this.primaryActionOperation = null;
+      this.mergeSheetMetadataLoading = false;
+      this.mergeSheetMetadataPromise = null;
       this.init();
     }
 
@@ -56,6 +58,9 @@
 
     markFilesChanged() {
       this.fileVersion++;
+      // Invalidate any in-flight preview immediately. The next scheduled
+      // refresh gets a new task id and cannot be overwritten by stale work.
+      this.beginPreviewTask();
       this.smartMappingApproved = false;
       this.smartMappingDeclined = false;
       this.invalidateProcessingCache();
@@ -216,6 +221,7 @@
         fileHandle: fileHandle || null,
         handleId: null,
         selectedMergeSheetIndex: 0,
+        sheetMetadata: null,
       };
     }
 
@@ -232,6 +238,7 @@
         fileHandle: fileHandle || null,
         handleId: null,
         selectedMergeSheetIndex: 0,
+        sheetMetadata: null,
       };
     }
 
@@ -250,16 +257,83 @@
         return null;
       }
 
-      const rawIndex = Number(item.selectedMergeSheetIndex);
-      const requestedIndex = Number.isFinite(rawIndex) ? Math.trunc(rawIndex) : 0;
-      const selectedIndex = Math.max(0, Math.min(requestedIndex, sheets.length - 1));
-      item.selectedMergeSheetIndex = selectedIndex;
+      const selectedIndex = this.normalizeMergeSheetIndex(item, sheets.length);
       return sheets[selectedIndex];
     }
 
     getStoredMergeSheetIndex(item) {
       const rawIndex = Number(item?.selectedMergeSheetIndex);
       return Number.isFinite(rawIndex) ? Math.trunc(rawIndex) : 0;
+    }
+
+    normalizeMergeSheetIndex(item, sheetCount) {
+      if (!Number.isInteger(sheetCount) || sheetCount <= 0) {
+        if (item) item.selectedMergeSheetIndex = 0;
+        return 0;
+      }
+
+      const rawIndex = Number(item?.selectedMergeSheetIndex);
+      const requestedIndex = Number.isFinite(rawIndex) ? Math.trunc(rawIndex) : 0;
+      const selectedIndex = Math.max(0, Math.min(requestedIndex, sheetCount - 1));
+      if (item) item.selectedMergeSheetIndex = selectedIndex;
+      return selectedIndex;
+    }
+
+    getMergeSheetMetadata(item) {
+      const parsedSheets = item?.parsed?.sheets;
+      if (Array.isArray(parsedSheets)) {
+        return parsedSheets.map((sheet) => ({
+          name: sheet.name,
+          rowCount: Number.isFinite(sheet.rowCount)
+            ? sheet.rowCount
+            : (Array.isArray(sheet.data) ? sheet.data.length : null),
+          colCount: Number.isFinite(sheet.colCount)
+            ? sheet.colCount
+            : (Array.isArray(sheet.data?.[0]) ? sheet.data[0].length : null),
+        }));
+      }
+
+      return Array.isArray(item?.sheetMetadata) ? item.sheetMetadata : null;
+    }
+
+    getSelectedMergeSheetStats(item) {
+      const toStats = (sheet) => {
+        if (!sheet) return null;
+        const rowCount = Number.isFinite(sheet.rowCount)
+          ? sheet.rowCount
+          : (Array.isArray(sheet.data) ? sheet.data.length : null);
+        const colCount = Number.isFinite(sheet.colCount)
+          ? sheet.colCount
+          : (Array.isArray(sheet.data?.[0]) ? sheet.data[0].length : null);
+        if (!Number.isFinite(rowCount) || !Number.isFinite(colCount)) return null;
+        return {
+          rowCount,
+          dataRowCount: Math.max(rowCount - 1, 0),
+          colCount,
+        };
+      };
+
+      const parsedSheetStats = toStats(this.getSelectedMergeSheet(item));
+      if (parsedSheetStats) return parsedSheetStats;
+
+      const metadata = this.getMergeSheetMetadata(item);
+      if (!Array.isArray(metadata) || metadata.length === 0) return null;
+      const selectedIndex = this.normalizeMergeSheetIndex(item, metadata.length);
+      return toStats(metadata[selectedIndex]);
+    }
+
+    applySelectedMergePreviewMetadata(item, preview) {
+      if (!preview?.previewMeta || !item) return preview;
+      const stats = this.getSelectedMergeSheetStats(item);
+      if (!stats) return preview;
+
+      Object.assign(preview.previewMeta, {
+        rowCount: stats.rowCount,
+        dataRowCount: stats.dataRowCount,
+        colCount: stats.colCount,
+        sheetCount: 1,
+      });
+      return preview;
     }
 
     /**
@@ -470,6 +544,76 @@
       });
     }
 
+    async hydrateMergeSheetMetadata() {
+      if (this.getOpenMode() !== 'merge') return;
+      if (this.mergeSheetMetadataPromise) return this.mergeSheetMetadataPromise;
+
+      const pendingItems = this.files.filter((item) =>
+        item && !item.parsed && item.file &&
+        (item.ext === 'xlsx' || item.ext === 'xls') &&
+        !Array.isArray(item.sheetMetadata)
+      );
+
+      if (pendingItems.length === 0) {
+        this.renderFileList();
+        await this.updateCustomMappingVisibility();
+        return;
+      }
+
+      const hydration = (async () => {
+        this.mergeSheetMetadataLoading = true;
+        this.setStatus('Loading worksheet information\u2026', 'loading');
+        this.renderFileList();
+
+        try {
+          const hints = this.getIncomingWorkloadHints(
+            pendingItems.map((item) => ({ file: item.file, ext: item.ext, size: item.size })),
+            { preserveFormatting: false }
+          );
+
+          await this.mapWithConcurrency(pendingItems, hints.parseConcurrency, async (item, index) => {
+            this.setStatus(`Loading worksheets (${index + 1}/${pendingItems.length})\u2026`, 'loading');
+            const metadata = await this.runProcessingTask(
+              'workbookMetadata',
+              { file: item.file },
+              () => typeof Parser.getWorkbookMetadata === 'function'
+                ? Parser.getWorkbookMetadata(item.file)
+                : this.ensureParsedEntry(item, { preserveFormatting: false }, 'merge worksheet metadata')
+            );
+
+            item.sheetMetadata = Array.isArray(metadata?.sheets)
+              ? metadata.sheets.map((sheet) => ({
+                name: sheet.name,
+                rowCount: Number.isFinite(sheet.rowCount) ? sheet.rowCount : null,
+                colCount: Number.isFinite(sheet.colCount) ? sheet.colCount : null,
+              }))
+              : [];
+            this.normalizeMergeSheetIndex(item, item.sheetMetadata.length);
+          });
+
+          if (this.getOpenMode() === 'merge') {
+            this.renderFileList();
+            this._updateSummaryCards();
+            await this.updateCustomMappingVisibility();
+            this.setStatus('Worksheet information loaded', 'info');
+          }
+        } catch (error) {
+          if (this.getOpenMode() === 'merge') {
+            this.renderFileList();
+            this.setStatus(`Could not load worksheet information: ${error.message}`, 'warning');
+          }
+        } finally {
+          this.mergeSheetMetadataLoading = false;
+          this.renderFileList();
+        }
+      })();
+
+      this.mergeSheetMetadataPromise = hydration.finally(() => {
+        this.mergeSheetMetadataPromise = null;
+      });
+      return this.mergeSheetMetadataPromise;
+    }
+
     buildStatsFromPreview(preview) {
       const meta = preview?.previewMeta || {};
       const rowCount = meta.rowCount ?? null;
@@ -528,6 +672,7 @@
             metadataTrusted,
           },
         };
+        if (merge) this.applySelectedMergePreviewMetadata(item, preview);
         item.previewSample = preview;
         return preview;
       }
@@ -536,11 +681,21 @@
         throw new Error(`Re-add ${item?.name || 'this file'} to preview it`);
       }
 
+      const previewOptions = { sampleRows: 51 };
+      if (merge && (item.ext === 'xlsx' || item.ext === 'xls')) {
+        const metadata = this.getMergeSheetMetadata(item);
+        const selectedIndex = Array.isArray(metadata)
+          ? this.normalizeMergeSheetIndex(item, metadata.length)
+          : this.getStoredMergeSheetIndex(item);
+        previewOptions.sheetIndex = selectedIndex;
+      }
+
       const preview = await this.runProcessingTask(
         'preview',
-        { file: item.file, options: { sampleRows: 51 } },
-        () => Parser.preview(item.file, { sampleRows: 51 })
+        { file: item.file, options: previewOptions },
+        () => Parser.preview(item.file, previewOptions)
       );
+      if (merge) this.applySelectedMergePreviewMetadata(item, preview);
       item.previewSample = preview;
       const exactSummary = this.buildStatsFromPreview(preview);
       if (exactSummary) {
@@ -766,6 +921,9 @@
     releaseParsedEntry(item) {
       if (!item?.file || !item?.parsed) return false;
 
+      if (!Array.isArray(item.sheetMetadata)) {
+        item.sheetMetadata = this.getMergeSheetMetadata(item);
+      }
       item.stats = item.stats || this.computeParsedStats(item.parsed);
       item.parsed = null;
       item.lazy = true;
@@ -943,18 +1101,20 @@
       return this.smartMappingCheckbox.checked && this.smartMappingApproved;
     }
 
+    getSelectedMergeInput(item) {
+      const sheet = this.getSelectedMergeSheet(item);
+      return {
+        sheets: sheet ? [{
+          name: sheet.name,
+          data: sheet.data,
+          cellMeta: sheet.cellMeta || null,
+        }] : [],
+      };
+    }
+
     async getMergedProcessedData(options = this.getCleaningOptions()) {
       const smartMapping = this.isSmartMappingActive();
-      const raw = this.files.map((item) => {
-        const sheet = this.getSelectedMergeSheet(item);
-        return {
-          sheets: sheet ? [{
-            name: sheet.name,
-            data: sheet.data,
-            cellMeta: sheet.cellMeta || null,
-          }] : [],
-        };
-      });
+      const raw = this.files.map((item) => this.getSelectedMergeInput(item));
       const selectedSheetKey = this.files
         .map((item) => this.getStoredMergeSheetIndex(item))
         .join(',');
@@ -1459,6 +1619,7 @@
         lazy: Boolean(item.lazy && !item.parsed),
         handleId: item.handleId || null,
         selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
+        sheetMetadata: item.sheetMetadata || null,
         sheets: item.parsed
           ? item.parsed.sheets.map(({ name, data, cellMeta }) => ({ name, data, cellMeta }))
           : null,
@@ -1474,6 +1635,7 @@
         lazy: Boolean(item.lazy && !item.parsed),
         handleId: item.handleId || null,
         selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
+        sheetMetadata: item.sheetMetadata || null,
         file: item.file || null,
         parsed: item.parsed
           ? {
@@ -1568,6 +1730,7 @@
             lazy: Boolean(item.lazy && !item.sheets),
             handleId: item.handleId || null,
             selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
+            sheetMetadata: Array.isArray(item.sheetMetadata) ? item.sheetMetadata : null,
             fileHandle: null,
           }));
 
@@ -1978,8 +2141,39 @@
 
     // ---- UI Rendering ----
 
+    handleMergeSheetSelection(fileIndex, value) {
+      if (this.uploading) return;
+      const item = this.files[fileIndex];
+      if (!item || this.getOpenMode() !== 'merge') return;
+
+      const metadata = this.getMergeSheetMetadata(item);
+      if (!Array.isArray(metadata) || metadata.length <= 1) return;
+
+      const nextIndex = this.normalizeMergeSheetIndex(
+        item,
+        metadata.length
+      );
+      const requestedIndex = Number(value);
+      const selectedIndex = Number.isFinite(requestedIndex)
+        ? Math.trunc(requestedIndex)
+        : nextIndex;
+      const clampedIndex = Math.max(0, Math.min(selectedIndex, metadata.length - 1));
+      if (clampedIndex === item.selectedMergeSheetIndex) return;
+
+      item.selectedMergeSheetIndex = clampedIndex;
+      item.previewSample = null;
+      item.summaryStats = null;
+      this.markFilesChanged();
+      this.hidePreview();
+      void this.updateCustomMappingVisibility();
+      this.schedulePreviewRefresh();
+      this._updateSummaryCards();
+      this.saveFilesSession();
+    }
+
     renderFileList() {
       this.fileList.innerHTML = '';
+      const isMergeMode = this.getOpenMode() === 'merge';
 
       this.files.forEach((item, index) => {
         const li = document.createElement('li');
@@ -2007,6 +2201,34 @@
             <span class="file-meta">${metaText}</span>
           </div>
         `;
+
+        const supportsWorksheetSelection = item.ext === 'xlsx' || item.ext === 'xls';
+        const sheetMetadata = isMergeMode && supportsWorksheetSelection
+          ? this.getMergeSheetMetadata(item)
+          : null;
+        if (Array.isArray(sheetMetadata) && sheetMetadata.length > 1) {
+          const sheetSelect = document.createElement('select');
+          sheetSelect.className = 'merge-sheet-select';
+          sheetSelect.id = `merge-sheet-select-${index}`;
+          sheetSelect.setAttribute('aria-label', `Worksheet for ${item.name}`);
+          sheetSelect.disabled = this.uploading || this.mergeSheetMetadataLoading;
+
+          const selectedIndex = this.normalizeMergeSheetIndex(item, sheetMetadata.length);
+          sheetMetadata.forEach((sheet, sheetIndex) => {
+            const option = document.createElement('option');
+            option.value = sheetIndex;
+            const rowCount = Number.isFinite(sheet.rowCount) ? `${sheet.rowCount} rows` : null;
+            const colCount = Number.isFinite(sheet.colCount) ? `${sheet.colCount} cols` : null;
+            const dimensions = [rowCount, colCount].filter(Boolean).join(' × ');
+            option.textContent = `${sheet.name || `Worksheet ${sheetIndex + 1}`}${dimensions ? ` (${dimensions})` : ''}`;
+            sheetSelect.appendChild(option);
+          });
+          sheetSelect.value = String(selectedIndex);
+          sheetSelect.addEventListener('change', () => {
+            this.handleMergeSheetSelection(index, sheetSelect.value);
+          });
+          info.querySelector('.file-details').appendChild(sheetSelect);
+        }
 
         const actions = document.createElement('div');
         actions.className = 'file-actions';
@@ -2167,9 +2389,13 @@
       let totalRows = 0;
       let maxCols = 0;
       let hasAllStats = true;
+      const isMergeMode = this.getOpenMode() === 'merge';
 
       for (const file of this.files) {
-        const summary = file.stats || (file.parsed ? this.getEntryStats(file) : null) || file.summaryStats;
+        const selectedSummary = isMergeMode ? this.getSelectedMergeSheetStats(file) : null;
+        const summary = isMergeMode
+          ? (selectedSummary || (file.summaryStats?.sheetCount === 1 ? file.summaryStats : null))
+          : (file.stats || (file.parsed ? this.getEntryStats(file) : null) || file.summaryStats);
         if (!summary) {
           hasAllStats = false;
           continue;
@@ -2184,7 +2410,7 @@
           }
           summary.dataRowCount = dataRows;
         }
-        if (dataRows === undefined) {
+        if (!Number.isFinite(dataRows) || !Number.isFinite(summary.colCount)) {
           hasAllStats = false;
           continue;
         }
@@ -2206,7 +2432,12 @@
         this.customMappingOption.classList.add('hidden');
         this.customMappingList.innerHTML = '';
       }
-      void this.updateCustomMappingVisibility();
+      this.renderFileList();
+      if (isMerge) {
+        void this.hydrateMergeSheetMetadata();
+      } else {
+        void this.updateCustomMappingVisibility();
+      }
       this._updateOpenModeCards();
     }
 
@@ -3294,16 +3525,7 @@
 
             // Step 1: Merge raw data (without cleaning) to get sourceMap
             this.showProgress(10);
-            const raw = this.files.map((item) => {
-              const sheet = this.getSelectedMergeSheet(item);
-              return {
-                sheets: sheet ? [{
-                  name: sheet.name,
-                  data: sheet.data,
-                  cellMeta: sheet.cellMeta || null,
-                }] : [],
-              };
-            });
+            const raw = this.files.map((item) => this.getSelectedMergeInput(item));
             const smartMapping = this.isSmartMappingActive();
             const mappingContext = this.buildCustomMappingContextFromRawFiles(
               raw,
