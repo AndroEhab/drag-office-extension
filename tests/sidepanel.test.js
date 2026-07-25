@@ -1842,6 +1842,185 @@ describe('DragToSheetsApp', () => {
     });
   });
 
+  // ---- Merge worksheet selection ----
+
+  describe('merge worksheet selection', () => {
+    function makeParsedWorkbook(sheetCount = 2) {
+      return {
+        sheets: Array.from({ length: sheetCount }, (_, index) => ({
+          name: `Sheet${index + 1}`,
+          data: [[`Header${index + 1}`], [`Value${index + 1}`]],
+        })),
+      };
+    }
+
+    test('new file entries default to worksheet index 0', async () => {
+      const app = await createApp();
+      const parsed = makeParsedWorkbook();
+      const entry = app.createParsedFileEntry(new File(['data'], 'book.xlsx'), 'xlsx', parsed);
+
+      expect(entry.selectedMergeSheetIndex).toBe(0);
+      expect(app.getSelectedMergeSheet(entry)).toBe(parsed.sheets[0]);
+    });
+
+    test('clamps invalid and stale indexes to a valid worksheet', async () => {
+      const app = await createApp();
+      const entry = { parsed: makeParsedWorkbook(), selectedMergeSheetIndex: 99 };
+
+      expect(app.getSelectedMergeSheet(entry)).toBe(entry.parsed.sheets[1]);
+      expect(entry.selectedMergeSheetIndex).toBe(1);
+
+      entry.selectedMergeSheetIndex = -4;
+      expect(app.getSelectedMergeSheet(entry)).toBe(entry.parsed.sheets[0]);
+      expect(entry.selectedMergeSheetIndex).toBe(0);
+
+      entry.selectedMergeSheetIndex = 'not-an-index';
+      expect(app.getSelectedMergeSheet(entry)).toBe(entry.parsed.sheets[0]);
+      expect(entry.selectedMergeSheetIndex).toBe(0);
+    });
+
+    test('single-sheet files always resolve to worksheet index 0', async () => {
+      const app = await createApp();
+      const entry = { parsed: makeParsedWorkbook(1), selectedMergeSheetIndex: 7 };
+
+      expect(app.getSelectedMergeSheet(entry)).toBe(entry.parsed.sheets[0]);
+      expect(entry.selectedMergeSheetIndex).toBe(0);
+    });
+
+    test('persists the selected index through chrome.storage.session', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'book.csv',
+        ext: 'csv',
+        size: 100,
+        parsed: makeParsedWorkbook(),
+        selectedMergeSheetIndex: 1,
+      }];
+
+      app.saveFilesSession();
+
+      const sessionCall = chrome.storage.session.set.mock.calls.find(
+        ([value]) => Array.isArray(value.files) && value.files.length > 0
+      );
+      expect(sessionCall[0].files[0].selectedMergeSheetIndex).toBe(1);
+    });
+
+    test('persists the selected index through the IndexedDB fallback', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'large.csv',
+        ext: 'csv',
+        size: 100,
+        file: new File(['data'], 'large.csv'),
+        parsed: makeParsedWorkbook(),
+        selectedMergeSheetIndex: 1,
+      }];
+      jest.spyOn(app, 'shouldPersistFilesSession').mockReturnValue(false);
+      jest.spyOn(app, 'canUseIndexedDb').mockReturnValue(true);
+      const saveIndexedDb = jest.spyOn(app, 'saveFilesToIndexedDb').mockResolvedValue(undefined);
+
+      app.saveFilesSession();
+      await Promise.resolve();
+
+      expect(saveIndexedDb).toHaveBeenCalledWith([
+        expect.objectContaining({ selectedMergeSheetIndex: 1 }),
+      ]);
+    });
+
+    test('restores the selected index from session storage', async () => {
+      chrome.storage.session.get.mockResolvedValue({
+        files: [{
+          name: 'book.csv',
+          ext: 'csv',
+          selectedMergeSheetIndex: 1,
+          sheets: makeParsedWorkbook().sheets,
+        }],
+      });
+
+      const app = await createApp();
+
+      expect(app.files[0].selectedMergeSheetIndex).toBe(1);
+      expect(app.getSelectedMergeSheet(app.files[0]).name).toBe('Sheet2');
+    });
+
+    test('restores the selected index from the IndexedDB fallback', async () => {
+      chrome.storage.session.get.mockResolvedValue({
+        files: [],
+        sessionSummary: { persisted: 'indexeddb' },
+      });
+      jest.spyOn(global.DragToSheetsApp.prototype, 'loadFilesFromIndexedDb').mockResolvedValueOnce({
+        files: [{
+          name: 'large.csv',
+          ext: 'csv',
+          selectedMergeSheetIndex: 1,
+          sheets: makeParsedWorkbook().sheets,
+        }],
+      });
+
+      const app = await createApp();
+
+      expect(app.files[0].selectedMergeSheetIndex).toBe(1);
+      expect(app.getSelectedMergeSheet(app.files[0]).name).toBe('Sheet2');
+    });
+
+    test('preserves the selection across reparsing and reclamps it after a sheet is removed', async () => {
+      const app = await createApp();
+      const entry = {
+        name: 'book.csv',
+        ext: 'csv',
+        file: new File(['data'], 'book.csv'),
+        parsed: null,
+        selectedMergeSheetIndex: 1,
+      };
+      app.files = [entry];
+      Parser.parse.mockResolvedValueOnce(makeParsedWorkbook(2));
+
+      await app.ensureParsedEntry(entry);
+
+      expect(entry.selectedMergeSheetIndex).toBe(1);
+
+      entry.parsed = null;
+      Parser.parse.mockResolvedValueOnce(makeParsedWorkbook(1));
+      await app.ensureParsedEntry(entry);
+
+      expect(entry.selectedMergeSheetIndex).toBe(0);
+    });
+
+    test('uses the selected worksheet for merge inputs', async () => {
+      const app = await createApp();
+      app.files = [
+        { name: 'one.csv', parsed: makeParsedWorkbook(), selectedMergeSheetIndex: 1 },
+        { name: 'two.csv', parsed: makeParsedWorkbook(), selectedMergeSheetIndex: 1 },
+      ];
+
+      await app.getMergedProcessedData();
+
+      const [rawFiles] = Merger.merge.mock.calls.at(-1);
+      expect(rawFiles.map((file) => file.sheets[0].name)).toEqual(['Sheet2', 'Sheet2']);
+    });
+
+    test('separate upload still includes every worksheet', async () => {
+      const app = await createApp();
+      const item = {
+        name: 'book.csv',
+        ext: 'csv',
+        file: new File(['data'], 'book.csv'),
+        parsed: makeParsedWorkbook(),
+        selectedMergeSheetIndex: 1,
+      };
+      jest.spyOn(app, 'shouldUseNativeDriveImport').mockReturnValue(false);
+
+      await app.uploadOneFile(item, 0, {
+        options: {},
+        hasCleaning: false,
+        shouldTightenGrid: false,
+      });
+
+      const sheets = GoogleAPI.createSpreadsheet.mock.calls[0][1];
+      expect(sheets.map((sheet) => sheet.name)).toEqual(['Sheet1', 'Sheet2']);
+    });
+  });
+
   // ---- File handling ----
 
   describe('handleFiles', () => {

@@ -215,6 +215,7 @@
         contentFingerprint,
         fileHandle: fileHandle || null,
         handleId: null,
+        selectedMergeSheetIndex: 0,
       };
     }
 
@@ -230,7 +231,35 @@
         lazy: true,
         fileHandle: fileHandle || null,
         handleId: null,
+        selectedMergeSheetIndex: 0,
       };
+    }
+
+    /**
+     * Return the worksheet currently selected for merge mode.
+     *
+     * The index is intentionally normalized here, at the boundary where a
+     * file entry is converted into a worksheet. This keeps restored, legacy,
+     * and reparsed entries safe without making separate-mode code depend on
+     * merge selection state.
+     */
+    getSelectedMergeSheet(item) {
+      const sheets = item?.parsed?.sheets;
+      if (!Array.isArray(sheets) || sheets.length === 0) {
+        if (item) item.selectedMergeSheetIndex = 0;
+        return null;
+      }
+
+      const rawIndex = Number(item.selectedMergeSheetIndex);
+      const requestedIndex = Number.isFinite(rawIndex) ? Math.trunc(rawIndex) : 0;
+      const selectedIndex = Math.max(0, Math.min(requestedIndex, sheets.length - 1));
+      item.selectedMergeSheetIndex = selectedIndex;
+      return sheets[selectedIndex];
+    }
+
+    getStoredMergeSheetIndex(item) {
+      const rawIndex = Number(item?.selectedMergeSheetIndex);
+      return Number.isFinite(rawIndex) ? Math.trunc(rawIndex) : 0;
     }
 
     /**
@@ -393,7 +422,10 @@
     }
 
     async ensureParsedEntry(item, options = {}, reason = 'parse') {
-      if (item?.parsed) return item.parsed;
+      if (item?.parsed) {
+        this.getSelectedMergeSheet(item);
+        return item.parsed;
+      }
       if (!item?.file) {
         throw new Error(`Re-add ${item?.name || 'this file'} to continue`);
       }
@@ -406,6 +438,7 @@
       );
 
       item.parsed = parsed;
+      this.getSelectedMergeSheet(item);
       item.stats = this.computeParsedStats(parsed);
       delete item.summaryStats;
       item.lazy = false;
@@ -451,10 +484,15 @@
       return { sheetCount, rowCount, dataRowCount, colCount };
     }
 
-    async ensurePreviewSample(item) {
-      if (item?.previewSample) return item.previewSample;
+    async ensurePreviewSample(item, { merge = false } = {}) {
+      if (!merge && item?.previewSample) return item.previewSample;
+      if (merge && !item?.parsed && this.getStoredMergeSheetIndex(item) !== 0) {
+        await this.ensureParsedEntry(item, { preserveFormatting: true }, 'merge preview');
+      }
       if (item?.parsed) {
-        const sourceSheet = item.parsed.sheets[0] || {};
+        const sourceSheet = merge
+          ? (this.getSelectedMergeSheet(item) || {})
+          : (item.parsed.sheets[0] || {});
         const data = sourceSheet.data || [];
         const sourceMeta = sourceSheet.cellMeta;
         const rows = data.slice(0, PREVIEW_SAMPLE_ROWS);
@@ -478,9 +516,11 @@
         const preview = {
           sheets: [previewSheet],
           previewMeta: {
-            rowCount: item.stats?.rowCount ?? data.length,
-            dataRowCount: item.stats?.dataRowCount ?? Math.max(data.length - 1, 0),
-            colCount: item.stats?.colCount ?? colCount,
+            rowCount: merge ? data.length : (item.stats?.rowCount ?? data.length),
+            dataRowCount: merge
+              ? Math.max(data.length - 1, 0)
+              : (item.stats?.dataRowCount ?? Math.max(data.length - 1, 0)),
+            colCount: merge ? colCount : (item.stats?.colCount ?? colCount),
             sheetCount: item.stats?.sheetCount ?? item.parsed.sheets.length,
             sampled: data.length > sampledRows.length,
             sampleRows: sampledRows.length,
@@ -491,6 +531,7 @@
         item.previewSample = preview;
         return preview;
       }
+      if (item?.previewSample) return item.previewSample;
       if (!item?.file) {
         throw new Error(`Re-add ${item?.name || 'this file'} to preview it`);
       }
@@ -604,7 +645,7 @@
       let hasUntrustedExcelMetadata = false;
 
       for (const item of this.files) {
-        const preview = await this.ensurePreviewSample(item);
+        const preview = await this.ensurePreviewSample(item, { merge: true });
         const rawData = preview.sheets[0]?.data || [];
         const isExcel = item.ext === 'xlsx' || item.ext === 'xls';
         let cellMeta = preview.sheets[0]?.cellMeta || null;
@@ -904,13 +945,19 @@
 
     async getMergedProcessedData(options = this.getCleaningOptions()) {
       const smartMapping = this.isSmartMappingActive();
-      const raw = this.files.map((item) => ({
-        sheets: item.parsed.sheets.map((sheet) => ({
-          name: sheet.name,
-          data: sheet.data,
-          cellMeta: sheet.cellMeta || null,
-        })),
-      }));
+      const raw = this.files.map((item) => {
+        const sheet = this.getSelectedMergeSheet(item);
+        return {
+          sheets: sheet ? [{
+            name: sheet.name,
+            data: sheet.data,
+            cellMeta: sheet.cellMeta || null,
+          }] : [],
+        };
+      });
+      const selectedSheetKey = this.files
+        .map((item) => this.getStoredMergeSheetIndex(item))
+        .join(',');
       const mappingContext = this.buildCustomMappingContextFromRawFiles(
         raw,
         this.files.map((item) => item.name),
@@ -918,7 +965,7 @@
       );
       const activeCustomMappings = this.getActiveCustomMappingsForContext(mappingContext);
       const cmKey = JSON.stringify(activeCustomMappings);
-      const cacheKey = `merge|${this.fileVersion}|${this.getCleaningCacheKey(options)}|sm:${smartMapping}|cm:${cmKey}`;
+      const cacheKey = `merge|${this.fileVersion}|${this.getCleaningCacheKey(options)}|sm:${smartMapping}|cm:${cmKey}|sheets:${selectedSheetKey}`;
 
       if (this.processedDataCache.has(cacheKey)) {
         return this.processedDataCache.get(cacheKey);
@@ -1393,6 +1440,14 @@
      * Preferences go to storage.local (persist across restarts).
      */
     saveFilesSession() {
+      for (const item of this.files) {
+        if (item?.parsed) {
+          this.getSelectedMergeSheet(item);
+        } else if (item) {
+          item.selectedMergeSheetIndex = this.getStoredMergeSheetIndex(item);
+        }
+      }
+
       const serializedFiles = this.files.map((item) => ({
         name: item.name,
         ext: item.ext,
@@ -1403,6 +1458,7 @@
         contentFingerprint: item.contentFingerprint || null,
         lazy: Boolean(item.lazy && !item.parsed),
         handleId: item.handleId || null,
+        selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
         sheets: item.parsed
           ? item.parsed.sheets.map(({ name, data, cellMeta }) => ({ name, data, cellMeta }))
           : null,
@@ -1417,6 +1473,7 @@
         contentFingerprint: item.contentFingerprint || null,
         lazy: Boolean(item.lazy && !item.parsed),
         handleId: item.handleId || null,
+        selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
         file: item.file || null,
         parsed: item.parsed
           ? {
@@ -1510,6 +1567,7 @@
             contentFingerprint: item.contentFingerprint || null,
             lazy: Boolean(item.lazy && !item.sheets),
             handleId: item.handleId || null,
+            selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
             fileHandle: null,
           }));
 
@@ -1518,6 +1576,7 @@
 
           for (const entry of mapped) {
             if (entry.parsed) {
+              this.getSelectedMergeSheet(entry);
               const ext = entry.ext || '';
               if (ext === 'xlsx' || ext === 'xls') {
                 if (Parser.hasTypedCellMetadata(entry.parsed)) {
@@ -1862,6 +1921,7 @@
             { file: item.file, options: { preserveFormatting: true } },
             () => Parser.parse(item.file, { preserveFormatting: true })
           );
+          this.getSelectedMergeSheet(item);
           item.stats = this.computeParsedStats(item.parsed);
           hydrated = true;
         });
@@ -2220,7 +2280,7 @@
 
       for (const item of this.files) {
         if (usePreviewSamples || !item.parsed) {
-          const preview = await this.ensurePreviewSample(item);
+          const preview = await this.ensurePreviewSample(item, { merge: true });
           rawForDetection.push({
             sheets: [{
               name: preview.sheets[0]?.name || item.name,
@@ -2230,8 +2290,9 @@
           continue;
         }
 
+        const sheet = this.getSelectedMergeSheet(item);
         rawForDetection.push({
-          sheets: item.parsed.sheets.map((s) => ({ name: s.name, data: s.data })),
+          sheets: sheet ? [{ name: sheet.name, data: sheet.data }] : [],
         });
       }
 
@@ -2695,16 +2756,17 @@
 
       for (const item of this.files) {
         if (item.parsed) {
+          const sheet = this.getSelectedMergeSheet(item);
           rawFiles.push({
             sheets: [{
-              name: item.parsed.sheets[0]?.name || item.name,
-              data: item.parsed.sheets[0]?.data || [],
+              name: sheet?.name || item.name,
+              data: sheet?.data || [],
             }],
           });
           continue;
         }
 
-        const preview = await this.ensurePreviewSample(item);
+        const preview = await this.ensurePreviewSample(item, { merge: true });
         rawFiles.push({
           sheets: [{
             name: preview.sheets[0]?.name || item.name,
@@ -3218,11 +3280,12 @@
             await this.ensureFormattingData(excelWithRaw);
 
             // Styles are already extracted during parsing — no API calls needed
-            const fileStyles = this.files.map((item) =>
-              (item.ext === 'xlsx' || item.ext === 'xls')
-                ? item.parsed.sheets[0]?.styles || null
-                : null
-            );
+            const fileStyles = this.files.map((item) => {
+              const sheet = this.getSelectedMergeSheet(item);
+              return (item.ext === 'xlsx' || item.ext === 'xls')
+                ? sheet?.styles || null
+                : null;
+            });
             const fileThemeColors = this.files.map((item) =>
               (item.ext === 'xlsx' || item.ext === 'xls')
                 ? item.parsed.themeColors || null
@@ -3231,13 +3294,16 @@
 
             // Step 1: Merge raw data (without cleaning) to get sourceMap
             this.showProgress(10);
-            const raw = this.files.map((item) => ({
-              sheets: item.parsed.sheets.map((s) => ({
-                name: s.name,
-                data: s.data,
-                cellMeta: s.cellMeta || null,
-              })),
-            }));
+            const raw = this.files.map((item) => {
+              const sheet = this.getSelectedMergeSheet(item);
+              return {
+                sheets: sheet ? [{
+                  name: sheet.name,
+                  data: sheet.data,
+                  cellMeta: sheet.cellMeta || null,
+                }] : [],
+              };
+            });
             const smartMapping = this.isSmartMappingActive();
             const mappingContext = this.buildCustomMappingContextFromRawFiles(
               raw,
