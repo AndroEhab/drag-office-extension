@@ -421,29 +421,34 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.merge-sheet-select {
-  width: min(100%, 260px);
+.merge-sheet-select,
+.custom-mapping-select {
   min-width: 0;
-  margin-top: 4px;
-  padding: 3px 7px;
+  padding: 5px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 12px;
   font-family: inherit;
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
+  color: var(--color-text);
+  background: #fff;
   cursor: pointer;
   outline: none;
+  transition: border-color var(--transition-fast);
+  height: 30px;
 }
 
-.merge-sheet-select:hover:not(:disabled),
-.merge-sheet-select:focus-visible {
+.merge-sheet-select {
+  width: min(100%, 260px);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.merge-sheet-select:focus,
+.custom-mapping-select:focus {
   border-color: var(--color-accent);
-  color: var(--color-text);
-}
-
-.merge-sheet-select:focus-visible {
-  box-shadow: 0 0 0 2px rgba(24, 128, 56, 0.15);
+  box-shadow: 0 0 0 2px rgba(24, 128, 56, 0.12);
 }
 
 .merge-sheet-select:disabled {
@@ -890,23 +895,6 @@ body {
 
 .custom-mapping-select {
   flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-family: inherit;
-  color: var(--color-text);
-  background: #fff;
-  cursor: pointer;
-  outline: none;
-  transition: border-color var(--transition-fast);
-  height: 30px;
-}
-
-.custom-mapping-select:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(24, 128, 56, 0.12);
 }
 
 .custom-mapping-arrow {
@@ -1197,6 +1185,21 @@ body {
   border-right: 3px solid transparent;
   border-top: 4px solid var(--color-text-muted);
   transition: border-top-color var(--transition-fast);
+  z-index: 2;
+}
+
+/* Chrome can paint select text beneath a custom indicator despite padding. */
+.preview-select-wrapper::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 28px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-surface);
 }
 
 .preview-select-wrapper:has(.preview-select:not(:disabled)):hover::after {
