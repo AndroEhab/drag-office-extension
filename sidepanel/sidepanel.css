@@ -3,6 +3,14 @@
    Manifest V3 Chrome Extension
    =========================== */
 
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('fonts/Roboto-Variable.woff2') format('woff2');
+}
+
 :root {
   --color-accent: #188038;
   --color-accent-hover: #137333;
@@ -59,7 +67,7 @@
 }
 
 body {
-  font-family: 'Google Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Roboto', 'Google Sans', 'Segoe UI', Helvetica, Arial, sans-serif;
   font-size: 13px;
   color: var(--color-text);
   background: var(--color-bg);
@@ -1200,7 +1208,8 @@ body {
   min-width: 0;
   appearance: none;
   -webkit-appearance: none;
-  padding: 3px 22px 3px 10px;
+  /* Keep long file labels clear of the custom dropdown chevron. */
+  padding: 3px 32px 3px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   font-size: 12px;
