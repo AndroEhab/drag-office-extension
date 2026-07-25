@@ -222,7 +222,7 @@ function setupDOM() {
     </p>
     <div id="loading-panel" class="loading-panel">
       <div class="loading-panel-progress">
-        <div id="loading-panel-bar" class="loading-panel-bar" style="width:0%"></div>
+        <progress id="loading-panel-bar" class="loading-panel-bar" max="100" value="0"></progress>
       </div>
       <div class="loading-panel-body">
         <div id="loading-spinner" class="loading-spinner hidden"></div>
@@ -3126,20 +3126,20 @@ describe('DragToSheetsApp', () => {
   // ---- showProgress / hideProgress ----
 
   describe('progress bar', () => {
-    test('showProgress sets bar width', async () => {
+    test('showProgress sets the semantic progress value', async () => {
       const app = await createApp();
 
       app.showProgress(50);
 
-      expect(app.loadingBar.style.width).toBe('50%');
+      expect(app.loadingBar.value).toBe(50);
     });
 
-    test('showProgress caps at 100%', async () => {
+    test('showProgress caps the semantic progress value at 100', async () => {
       const app = await createApp();
 
       app.showProgress(150);
 
-      expect(app.loadingBar.style.width).toBe('100%');
+      expect(app.loadingBar.value).toBe(100);
     });
 
     test('hideProgress resets bar after delay', async () => {
@@ -3152,11 +3152,11 @@ describe('DragToSheetsApp', () => {
       app.hideProgress();
 
       // Not reset immediately
-      expect(app.loadingBar.style.width).toBe('100%');
+      expect(app.loadingBar.value).toBe(100);
 
       // Reset after 800ms
       jest.advanceTimersByTime(800);
-      expect(app.loadingBar.style.width).toBe('0%');
+      expect(app.loadingBar.value).toBe(0);
       expect(app.loadingPanel.classList.contains('loading-panel--active')).toBe(false);
       expect(app.loadingSpinner.classList.contains('hidden')).toBe(true);
 

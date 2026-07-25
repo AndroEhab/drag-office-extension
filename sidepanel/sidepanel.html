@@ -8,221 +8,232 @@
 </head>
 <body>
   <div class="app">
-    <header class="app-header">
-      <img src="../images/logo-horizontal.png" alt="Drag to Sheets" class="app-logo">
-      <span class="badge">Beta</span>
-    </header>
+    <main class="app-content">
+      <header class="app-header">
+        <img src="../images/logo-icon.png" alt="" class="app-logo" aria-hidden="true">
+        <h1 class="app-title">Drag to Sheets</h1>
+        <span class="badge">Beta</span>
+      </header>
 
-    <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Drop area for spreadsheet files">
-      <div class="drop-zone-content">
-        <div class="drop-icon">
-          <i data-lucide="file-up" class="app-icon app-icon--drop" aria-hidden="true"></i>
+      <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Drop area for spreadsheet files">
+        <div class="drop-zone-content">
+          <div class="drop-icon">
+            <i data-lucide="file-up" class="app-icon app-icon--drop" aria-hidden="true"></i>
+          </div>
+          <p class="drop-text">Drop spreadsheet files here</p>
+          <p class="drop-hint">or click to browse</p>
+          <p class="drop-hint drop-hint--formats">CSV &nbsp; TSV &nbsp; XLSX &nbsp; XLS</p>
         </div>
-        <p class="drop-text">Drop spreadsheet files here</p>
-        <p class="drop-hint">or click to browse</p>
-        <p class="drop-hint drop-hint--formats">CSV &nbsp; TSV &nbsp; XLSX &nbsp; XLS</p>
+        <input type="file" id="file-input" accept=".csv,.tsv,.xlsx,.xls" multiple hidden>
       </div>
-      <input type="file" id="file-input" accept=".csv,.tsv,.xlsx,.xls" multiple hidden>
-    </div>
 
-    <div class="url-import">
-      <button id="url-toggle" class="url-toggle" aria-expanded="false">
-        <i data-lucide="link" class="app-icon app-icon--url" aria-hidden="true"></i>
-        Import from URL
-        <i data-lucide="chevron-right" class="app-icon url-toggle-chevron" aria-hidden="true"></i>
-      </button>
-      <div id="url-bar" class="url-bar hidden">
-        <input
-          id="url-input"
-          type="url"
-          class="url-input"
-          placeholder="https://example.com/data.csv"
-          aria-label="File URL"
-          spellcheck="false"
-          autocomplete="off"
-        />
-        <button id="url-fetch-btn" class="url-fetch-btn">
-          Import
+      <div class="url-import">
+        <button id="url-toggle" class="url-toggle" aria-expanded="false">
+          <i data-lucide="link" class="app-icon app-icon--url" aria-hidden="true"></i>
+          Import from URL
+          <i data-lucide="chevron-right" class="app-icon url-toggle-chevron" aria-hidden="true"></i>
         </button>
-        <p class="url-hint">Only import files from URLs you trust.</p>
-      </div>
-    </div>
-
-    <section class="files-section">
-      <div class="files-header">
-        <h2>Files <span id="file-count"></span></h2>
-        <button id="clear-btn" class="btn-text" disabled>Clear all</button>
-      </div>
-      <div id="dataset-summary" class="dataset-summary hidden" role="group" aria-label="Dataset summary">
-        <div class="summary-card">
-          <span class="summary-card-value" id="summary-files">0</span>
-          <span class="summary-card-label">Files</span>
-        </div>
-        <div class="summary-card">
-          <span class="summary-card-value" id="summary-rows">0</span>
-          <span class="summary-card-label">Rows</span>
-        </div>
-        <div class="summary-card">
-          <span class="summary-card-value" id="summary-cols">0</span>
-          <span class="summary-card-label">Columns</span>
-        </div>
-      </div>
-      <ul id="file-list" class="file-list"></ul>
-    </section>
-
-    <section id="options-panel" class="options-panel">
-      <div id="merge-option" class="option-group hidden">
-        <h3>Open Mode</h3>
-        <div class="open-mode-options">
-          <label class="open-mode-card open-mode-card--selected" id="open-mode-separate-card">
-            <input type="radio" name="open-mode" value="separate" checked>
-            <span class="open-mode-card-label">Open separately</span>
-            <span class="open-mode-card-hint">Each file becomes its own spreadsheet</span>
-          </label>
-          <label class="open-mode-card" id="open-mode-merge-card">
-            <input type="radio" name="open-mode" value="merge">
-            <span class="open-mode-card-label">Merge into one</span>
-            <span class="open-mode-card-hint">Combine files into a single spreadsheet</span>
-          </label>
-        </div>
-        <div id="smart-mapping-option" class="smart-mapping-option hidden">
-          <label class="checkbox-label">
-            <input type="checkbox" id="opt-smart-mapping">
-            <span>Match similar headers automatically</span>
-          </label>
-          <p class="smart-mapping-hint">Combine columns with equivalent names.</p>
-        </div>
-        <div id="custom-mapping-option" class="custom-mapping-option hidden">
-          <span class="custom-mapping-title">Map columns to master file</span>
-          <div id="custom-mapping-list" class="custom-mapping-list"></div>
-          <button id="custom-mapping-add" class="btn-text custom-mapping-add-btn">+ Add mapping</button>
+        <div id="url-bar" class="url-bar hidden">
+          <input
+            id="url-input"
+            type="url"
+            class="url-input"
+            placeholder="https://example.com/data.csv"
+            aria-label="File URL"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button id="url-fetch-btn" class="url-fetch-btn">
+            Import
+          </button>
+          <p class="url-hint">Only import files from URLs you trust.</p>
         </div>
       </div>
 
-      <div id="mapping-review" class="mapping-review hidden">
-        <div class="mapping-review-header">
-          <h4>Review detected mappings</h4>
-          <p class="mapping-review-hint">These source headers will be combined into the same destination column.</p>
+      <section class="files-section">
+        <div class="files-header">
+          <h2>Files <span id="file-count"></span></h2>
+          <button id="clear-btn" class="btn-text" disabled>Clear all</button>
         </div>
-        <div id="mapping-review-list" class="mapping-review-list"></div>
-        <div class="mapping-review-actions">
-          <button id="mapping-approve-btn" class="btn btn-primary btn-sm">Apply mappings</button>
-          <button id="mapping-decline-btn" class="btn-text">Decline</button>
-        </div>
-      </div>
-
-      <button id="settings-btn" class="btn-settings" title="Cleaning options" aria-controls="cleaning-options" aria-expanded="false" aria-label="Toggle cleaning options">
-        <i data-lucide="settings-2" class="app-icon app-icon--settings" aria-hidden="true"></i>
-      </button>
-
-      <div id="cleaning-options" class="option-group hidden">
-        <h3>Cleaning Options</h3>
-        <div class="cleaning-options-grid">
-          <label class="checkbox-label">
-            <input type="checkbox" id="opt-trim">
-            <span>Trim whitespace</span>
-          </label>
-          <label class="checkbox-label">
-            <input type="checkbox" id="opt-empty-rows">
-            <span>Remove empty rows</span>
-          </label>
-          <label class="checkbox-label">
-            <input type="checkbox" id="opt-empty-cols">
-            <span>Remove empty columns</span>
-          </label>
-          <div class="dup-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="opt-duplicates">
-              <span>Remove duplicate rows</span>
-            </label>
-            <div id="dup-mode" class="dup-mode hidden">
-            <label class="radio-label radio-sub">
-              <input type="radio" name="dup-mode" value="keep-first" checked>
-              <span>Keep first occurrence</span>
-            </label>
-            <label class="radio-label radio-sub">
-              <input type="radio" name="dup-mode" value="absolute">
-              <span>Remove all instances</span>
-            </label>
+        <div id="dataset-summary" class="dataset-summary hidden" role="group" aria-label="Dataset summary">
+          <div class="summary-card">
+            <span class="summary-card-value" id="summary-files">0</span>
+            <span class="summary-card-label">Files</span>
           </div>
+          <div class="summary-card">
+            <span class="summary-card-value" id="summary-rows">0</span>
+            <span class="summary-card-label">Rows</span>
           </div>
-          <div class="help-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="opt-numbers">
-              <span>Fix number formatting</span>
-            </label>
-          </div>
-          <div class="help-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="opt-dates">
-              <span>Normalize dates</span>
-            </label>
-          </div>
-          <div class="help-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="opt-headers">
-              <span>Normalize header names</span>
-            </label>
+          <div class="summary-card">
+            <span class="summary-card-value" id="summary-cols">0</span>
+            <span class="summary-card-label">Columns</span>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section id="preview-panel" class="preview-panel hidden">
-      <div class="preview-header">
-        <div class="preview-header-left">
-          <h3>Preview</h3>
-          <div class="preview-select-wrapper">
-            <select id="preview-select" class="preview-select" disabled aria-label="Select file to preview"></select>
-          </div>
-        </div>
-        <span id="preview-stats" class="preview-stats"></span>
-      </div>
-      <div id="preview-table" class="preview-table-wrapper"></div>
-      <section
-        id="cleanup-results"
-        class="cleanup-results hidden"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        aria-labelledby="cleanup-results-title"
-      >
-        <div class="cleanup-results-header">
-          <i data-lucide="sparkles" class="app-icon cleanup-results-icon" aria-hidden="true"></i>
-          <h4 id="cleanup-results-title" class="cleanup-results-title">Cleanup applied</h4>
-        </div>
-        <ul id="cleanup-results-list" class="cleanup-results-list"></ul>
-        <p id="cleanup-results-empty" class="cleanup-results-empty hidden">No cleanup changes detected</p>
+        <ul id="file-list" class="file-list"></ul>
       </section>
-    </section>
 
-    <div class="actions">
-      <button id="upload-btn" class="btn btn-primary" disabled aria-label="Open in Sheets">
-        <i data-lucide="square-arrow-out-up-right" class="app-icon app-icon--button" aria-hidden="true"></i>
-        Open in Sheets
-      </button>
-    </div>
+      <section id="options-panel" class="options-panel">
+        <div id="merge-option" class="option-group hidden">
+          <h3>Open mode</h3>
+          <div class="open-mode-options">
+            <label class="open-mode-card open-mode-card--selected" id="open-mode-separate-card">
+              <input type="radio" name="open-mode" value="separate" checked>
+              <span class="open-mode-card-label">Open separately</span>
+              <span class="open-mode-card-hint">Each file becomes its own spreadsheet</span>
+            </label>
+            <label class="open-mode-card" id="open-mode-merge-card">
+              <input type="radio" name="open-mode" value="merge">
+              <span class="open-mode-card-label">Merge into one</span>
+              <span class="open-mode-card-hint">Combine files into a single spreadsheet</span>
+            </label>
+          </div>
+          <div id="smart-mapping-option" class="smart-mapping-option hidden">
+            <label class="checkbox-label">
+              <input type="checkbox" id="opt-smart-mapping">
+              <span>Match similar headers automatically</span>
+            </label>
+            <p class="smart-mapping-hint">Combine columns with equivalent names.</p>
+          </div>
+          <div id="custom-mapping-option" class="custom-mapping-option hidden">
+            <span class="custom-mapping-title">Map columns to master file</span>
+            <div id="custom-mapping-list" class="custom-mapping-list"></div>
+            <button id="custom-mapping-add" class="btn-text custom-mapping-add-btn">+ Add mapping</button>
+          </div>
+        </div>
 
-    <p class="privacy-note">
-      <i
-        data-lucide="shield"
-        class="app-icon privacy-note-icon"
-        aria-hidden="true"
-      ></i>
-      <span>Your file contents are processed on this device and sent to Google only when you choose Open in Sheets. We do not collect analytics or track you.</span>
-    </p>
+        <div id="mapping-review" class="mapping-review hidden">
+          <div class="mapping-review-header">
+            <h4>Review detected mappings</h4>
+            <p class="mapping-review-hint">These source headers will be combined into the same destination column.</p>
+          </div>
+          <div id="mapping-review-list" class="mapping-review-list"></div>
+          <div class="mapping-review-actions">
+            <button id="mapping-approve-btn" class="btn btn-primary btn-sm">Apply mappings</button>
+            <button id="mapping-decline-btn" class="btn-text">Decline</button>
+          </div>
+        </div>
 
-    <div id="loading-panel" class="loading-panel">
-      <div class="loading-panel-progress">
-        <div id="loading-panel-bar" class="loading-panel-bar"></div>
+        <button id="settings-btn" class="btn-settings" title="Cleaning options" aria-controls="cleaning-options" aria-expanded="false" aria-label="Toggle cleaning options">
+          <i data-lucide="settings-2" class="app-icon app-icon--settings" aria-hidden="true"></i>
+          <span class="btn-settings-label">Cleaning options</span>
+          <i data-lucide="chevron-down" class="app-icon btn-settings-chevron" aria-hidden="true"></i>
+        </button>
+
+        <div id="cleaning-options" class="option-group hidden">
+          <h3>Cleaning options</h3>
+          <div class="cleaning-options-grid">
+            <label class="checkbox-label">
+              <input type="checkbox" id="opt-trim">
+              <span>Trim whitespace</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="opt-empty-rows">
+              <span>Remove empty rows</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="opt-empty-cols">
+              <span>Remove empty columns</span>
+            </label>
+            <div class="dup-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="opt-duplicates">
+                <span>Remove duplicate rows</span>
+              </label>
+              <div id="dup-mode" class="dup-mode hidden">
+                <label class="radio-label radio-sub">
+                  <input type="radio" name="dup-mode" value="keep-first" checked>
+                  <span>Keep first occurrence</span>
+                </label>
+                <label class="radio-label radio-sub">
+                  <input type="radio" name="dup-mode" value="absolute">
+                  <span>Remove all instances</span>
+                </label>
+              </div>
+            </div>
+            <div class="help-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="opt-numbers">
+                <span>Fix number formatting</span>
+              </label>
+            </div>
+            <div class="help-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="opt-dates">
+                <span>Normalize dates</span>
+              </label>
+            </div>
+            <div class="help-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="opt-headers">
+                <span>Normalize header names</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="preview-panel" class="preview-panel hidden">
+        <div class="preview-header">
+          <div class="preview-header-left">
+            <h3>Preview</h3>
+            <div class="preview-select-wrapper">
+              <select id="preview-select" class="preview-select" disabled aria-label="Select file to preview"></select>
+            </div>
+          </div>
+          <span id="preview-stats" class="preview-stats"></span>
+        </div>
+        <div id="preview-table" class="preview-table-wrapper"></div>
+        <section
+          id="cleanup-results"
+          class="cleanup-results hidden"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-labelledby="cleanup-results-title"
+        >
+          <div class="cleanup-results-header">
+            <i data-lucide="sparkles" class="app-icon cleanup-results-icon" aria-hidden="true"></i>
+            <h4 id="cleanup-results-title" class="cleanup-results-title">Cleanup applied</h4>
+          </div>
+          <ul id="cleanup-results-list" class="cleanup-results-list"></ul>
+          <p id="cleanup-results-empty" class="cleanup-results-empty hidden">No cleanup changes detected</p>
+        </section>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <div class="actions">
+        <button id="upload-btn" class="btn btn-primary" disabled aria-label="Open in Sheets">
+          <i data-lucide="square-arrow-out-up-right" class="app-icon app-icon--button" aria-hidden="true"></i>
+          Open in Sheets
+        </button>
       </div>
-      <div class="loading-panel-body">
-        <div id="loading-spinner" class="loading-spinner hidden"></div>
-        <span id="loading-text" class="loading-text">Press <kbd>Ctrl+Shift+S</kbd> to open &middot; Drop files to start</span>
-        <span id="loading-sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></span>
-        <span id="loading-sr-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></span>
+
+      <p class="privacy-note">
+        <i
+          data-lucide="shield"
+          class="app-icon privacy-note-icon"
+          aria-hidden="true"
+        ></i>
+        <span>Your file contents are processed on this device and sent to Google only when you choose Open in Sheets. We do not collect analytics or track you.</span>
+      </p>
+
+      <div id="loading-panel" class="loading-panel">
+        <div class="loading-panel-progress">
+          <progress id="loading-panel-bar" class="loading-panel-bar" max="100" value="0" aria-label="Operation progress"></progress>
+        </div>
+        <div class="loading-panel-body">
+          <div id="loading-spinner" class="loading-spinner hidden"></div>
+          <i data-lucide="info" class="app-icon status-icon status-icon--info" aria-hidden="true"></i>
+          <i data-lucide="circle-check" class="app-icon status-icon status-icon--success" aria-hidden="true"></i>
+          <i data-lucide="triangle-alert" class="app-icon status-icon status-icon--warning" aria-hidden="true"></i>
+          <i data-lucide="circle-x" class="app-icon status-icon status-icon--error" aria-hidden="true"></i>
+          <span id="loading-text" class="loading-text">Press <kbd>Ctrl+Shift+S</kbd> to open &middot; Drop files to start</span>
+          <span id="loading-sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></span>
+          <span id="loading-sr-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></span>
+        </div>
       </div>
-    </div>
+    </footer>
   </div>
 
   <!-- SheetJS full build (required for Excel support + cell formatting preservation) -->

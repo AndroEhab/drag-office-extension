@@ -3474,13 +3474,13 @@
     // ---- Progress & Status ----
 
     showProgress(percent) {
-      const clamped = Math.min(Math.round(percent), 100);
-      this.loadingBar.style.width = `${clamped}%`;
+      const clamped = Math.max(0, Math.min(Math.round(percent), 100));
+      this.loadingBar.value = clamped;
     }
 
     hideProgress() {
       setTimeout(() => {
-        this.loadingBar.style.width = '0%';
+        this.loadingBar.value = 0;
         this.loadingPanel.classList.remove('loading-panel--active');
         this.loadingSpinner.classList.add('hidden');
       }, 800);
