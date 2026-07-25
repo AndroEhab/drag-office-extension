@@ -9,9 +9,9 @@ Drag spreadsheet files into a side panel and open them in Google Sheets with bui
 - **Drag & drop** files into the side panel (or click to browse)
 - **Multiple files** — open each separately or merge into one spreadsheet
 - **Per-file upload** — click the arrow on any file to open just that one
-- **Smart merge** — aligns columns by header name across files, with auto-detected header mapping
+- **Smart merge** — aligns columns by header name across files, with automatic matching of common header variants
 - **Custom column mapping** — manually map columns from source files to master headers
-- **Formatting preservation** — Excel cell styles (colors, fonts, borders) are preserved when uploaded
+- **Formatting preservation** — preserves common Excel cell formatting (fonts, fills, borders, alignment, number formats) where supported by Google Sheets
 - **URL import** — fetch spreadsheet files from a URL
 - **Cleaning tools** before upload:
   - Trim whitespace
@@ -70,7 +70,7 @@ Open `manifest.json` and replace the placeholder OAuth client ID:
 
 ## Adding Excel Support (.xlsx / .xls)
 
-CSV and TSV files work out of the box. For Excel support with formatting preservation:
+CSV and TSV files work out of the box. For Excel support with formatting:
 
 ```bash
 npm install

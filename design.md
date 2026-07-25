@@ -396,13 +396,13 @@ Do not hide the native input from assistive technology.
 
 ### Smart mapping option
 
-Rename the visible copy from the current lowercase `header mapping` to a clearer label such as:
+Use a precise label that avoids implying semantic understanding:
 
-`Match similar headers automatically`
+`Match common header variants automatically`
 
 Add a short explanation when space permits:
 
-`Combine columns with equivalent names.`
+`Handles differences such as capitalization, spaces, underscores, hyphens, and simple plural forms.`
 
 ### Mapping review
 

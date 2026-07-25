@@ -544,6 +544,40 @@ describe('Parser', () => {
       expect(result.previewMeta.sheetCount).toBe(2);
     });
 
+    test('uses the selected worksheet full range for sampled preview dimensions', async () => {
+      global.XLSX.read.mockReturnValue({
+        SheetNames: ['First', 'Second'],
+        Sheets: {
+          First: { '!ref': 'A1:C4', '!fullref': 'A1:C4' },
+          Second: { '!ref': 'A1:B3', '!fullref': 'A1:B500' },
+        },
+      });
+      global.XLSX.utils.sheet_to_json.mockReturnValue([
+        ['Second-selected'],
+        ['x'],
+        ['y'],
+      ]);
+      global.XLSX.utils.decode_range = jest.fn((ref) => {
+        const ranges = {
+          'A1:C4': { s: { r: 0, c: 0 }, e: { r: 3, c: 2 } },
+          'A1:B3': { s: { r: 0, c: 0 }, e: { r: 2, c: 1 } },
+          'A1:B500': { s: { r: 0, c: 0 }, e: { r: 499, c: 1 } },
+        };
+        return ranges[ref];
+      });
+
+      const result = await Parser.preview(makeExcelFile('sampled-selected.xlsx'), {
+        sampleRows: 3,
+        sheetIndex: 1,
+      });
+
+      expect(result.previewMeta.rowCount).toBe(500);
+      expect(result.previewMeta.dataRowCount).toBe(499);
+      expect(result.previewMeta.colCount).toBe(2);
+      expect(result.previewMeta.sampled).toBe(true);
+      expect(result.previewMeta.sampleRows).toBe(3);
+    });
+
     test('preserves sampled Excel metadata and cleaning semantics for typed cells', async () => {
       const formula = '=TEXT(1234,"0")';
       global.XLSX.read.mockReturnValue({
