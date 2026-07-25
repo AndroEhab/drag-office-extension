@@ -172,18 +172,6 @@ body {
   stroke-width: 2;
 }
 
-.badge {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-  line-height: 1.5;
-  flex-shrink: 0;
-  letter-spacing: 0;
-}
-
 /* ---- Drop Zone ---- */
 
 .drop-zone {

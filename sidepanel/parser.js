@@ -284,9 +284,10 @@ const Parser = (() => {
 
     let selectedRows = null;
     let selectedCols = null;
-    if (hasSheetSelection && sampleRef && typeof XLSX.utils.decode_range === 'function') {
+    const selectedFullRef = sheet?.['!fullref'] || sampleRef;
+    if (hasSheetSelection && selectedFullRef && typeof XLSX.utils.decode_range === 'function') {
       try {
-        const range = XLSX.utils.decode_range(sampleRef);
+        const range = XLSX.utils.decode_range(selectedFullRef);
         selectedRows = range.e.r - range.s.r + 1;
         selectedCols = range.e.c - range.s.c + 1;
       } catch (_) {

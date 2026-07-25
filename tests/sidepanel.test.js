@@ -2600,6 +2600,117 @@ describe('DragToSheetsApp', () => {
     });
   });
 
+  // ---- Preview cache isolation ----
+
+  describe('preview cache isolation', () => {
+    function makePreviewWorkbook() {
+      return {
+        name: 'preview-cache.xlsx',
+        ext: 'xlsx',
+        parsed: {
+          sheets: [
+            { name: 'Worksheet one', data: [['FIRST HEADER'], ['FIRST DATA']] },
+            { name: 'Worksheet two', data: [['SECOND HEADER'], ['SECOND DATA']] },
+          ],
+        },
+        selectedMergeSheetIndex: 0,
+        stats: {
+          sheetCount: 2,
+          rowCount: 4,
+          dataRowCount: 2,
+          colCount: 1,
+          cellCount: 4,
+          styledCellCount: 0,
+        },
+      };
+    }
+
+    function setOpenMode(app, mode) {
+      document.querySelector(`input[name="open-mode"][value="${mode}"]`).checked = true;
+      app.updateOpenModeState();
+    }
+
+    test('isolates sampled merge and separate previews while preserving the selected worksheet', async () => {
+      const app = await createApp();
+      const item = makePreviewWorkbook();
+      app.files = [item];
+      app.populatePreviewSelect();
+      jest.spyOn(app, 'shouldDeferPreview').mockReturnValue(true);
+      jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      jest.spyOn(app, 'updateCustomMappingVisibility').mockResolvedValue();
+
+      setOpenMode(app, 'merge');
+      const selector = document.querySelector('.merge-sheet-select');
+      selector.value = '1';
+      selector.dispatchEvent(new Event('change', { bubbles: true }));
+
+      await app.refreshPreview();
+      expect(item.selectedMergeSheetIndex).toBe(1);
+      expect(app.previewTable.textContent).toContain('SECOND DATA');
+      expect(app.previewTable.textContent).not.toContain('FIRST DATA');
+
+      item.summaryStats = { sheetCount: 1, rowCount: 2, dataRowCount: 1, colCount: 1 };
+      setOpenMode(app, 'separate');
+      await app.refreshPreview();
+
+      expect(app.previewTable.textContent).toContain('FIRST DATA');
+      expect(app.previewTable.textContent).not.toContain('SECOND DATA');
+      expect(item.summaryStats).toBeUndefined();
+
+      setOpenMode(app, 'merge');
+      await app.refreshPreview();
+
+      expect(item.selectedMergeSheetIndex).toBe(1);
+      expect(app.previewTable.textContent).toContain('SECOND DATA');
+      expect(app.previewTable.textContent).not.toContain('FIRST DATA');
+    });
+
+    test('rapid sampled worksheet changes cannot render a stale preview', async () => {
+      const app = await createApp();
+      app.files = [makePreviewWorkbook()];
+      app.populatePreviewSelect();
+      setOpenMode(app, 'merge');
+      jest.spyOn(app, 'shouldDeferPreview').mockReturnValue(true);
+      jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      jest.spyOn(app, 'updateCustomMappingVisibility').mockResolvedValue();
+
+      let resolveStale;
+      const stalePreview = new Promise((resolve) => {
+        resolveStale = resolve;
+      });
+      const responsivePreviewSpy = jest.spyOn(app, 'getResponsiveMergePreview')
+        .mockReturnValueOnce(stalePreview)
+        .mockResolvedValueOnce({
+          merged: { sheets: [{ name: 'Merged', data: [['CURRENT SAMPLE']] }] },
+          summary: { totalRows: 2, totalCols: 1, sampled: true, sampleRows: 2 },
+          notices: [],
+          cleaningStats: null,
+        });
+
+      const staleRefresh = app.refreshPreview();
+      for (let i = 0; i < 6 && responsivePreviewSpy.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(responsivePreviewSpy).toHaveBeenCalledTimes(1);
+
+      app.handleMergeSheetSelection(0, '1');
+      app.handleMergeSheetSelection(0, '0');
+      resolveStale({
+        merged: { sheets: [{ name: 'Merged', data: [['STALE SAMPLE']] }] },
+        summary: { totalRows: 2, totalCols: 1, sampled: true, sampleRows: 2 },
+        notices: [],
+        cleaningStats: null,
+      });
+      await staleRefresh;
+
+      expect(app.previewTable.textContent).not.toContain('STALE SAMPLE');
+
+      await app.refreshPreview();
+      expect(responsivePreviewSpy).toHaveBeenCalledTimes(2);
+      expect(app.previewTable.textContent).toContain('CURRENT SAMPLE');
+    });
+  });
+
   // ---- File handling ----
 
   describe('handleFiles', () => {
@@ -4176,6 +4287,63 @@ describe('DragToSheetsApp', () => {
       expect(document.querySelector('.merge-sheet-select').options[0].textContent).toEqual(
         expect.stringContaining('10 rows')
       );
+    });
+
+    test('hydrates workbook files added while worksheet metadata is loading', async () => {
+      const app = await createApp();
+      let resolveFirstMetadata;
+      const firstMetadata = new Promise((resolve) => {
+        resolveFirstMetadata = resolve;
+      });
+      Parser.getWorkbookMetadata
+        .mockImplementationOnce(() => firstMetadata)
+        .mockResolvedValueOnce({
+          sheets: [
+            { name: 'Second data', rowCount: 8, colCount: 3 },
+            { name: 'Second summary', rowCount: 2, colCount: 1 },
+          ],
+        });
+      app.updateCustomMappingVisibility = jest.fn().mockResolvedValue();
+      const first = {
+        name: 'first-lazy.xlsx',
+        ext: 'xlsx',
+        file: new File(['first'], 'first-lazy.xlsx'),
+        lazy: true,
+        parsed: null,
+      };
+      const second = {
+        name: 'second-lazy.xlsx',
+        ext: 'xlsx',
+        file: new File(['second'], 'second-lazy.xlsx'),
+        lazy: true,
+        parsed: null,
+      };
+      app.files = [first];
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+
+      app.updateOpenModeState();
+      const firstHydration = app.mergeSheetMetadataPromise;
+      app.files.push(second);
+      const hydrationWithStraggler = app.hydrateMergeSheetMetadata();
+
+      resolveFirstMetadata({
+        sheets: [
+          { name: 'First data', rowCount: 10, colCount: 2 },
+          { name: 'First summary', rowCount: 3, colCount: 1 },
+        ],
+      });
+      await firstHydration;
+      await hydrationWithStraggler;
+
+      expect(first.sheetMetadata).toEqual([
+        { name: 'First data', rowCount: 10, colCount: 2 },
+        { name: 'First summary', rowCount: 3, colCount: 1 },
+      ]);
+      expect(second.sheetMetadata).toEqual([
+        { name: 'Second data', rowCount: 8, colCount: 3 },
+        { name: 'Second summary', rowCount: 2, colCount: 1 },
+      ]);
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(2);
     });
 
     test('per-file open button triggers uploadSingleFromList with the correct index', async () => {

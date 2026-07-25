@@ -45,6 +45,7 @@
       this.workerTaskId = 0;
       this.workerPending = new Map();
       this.previewTaskId = 0;
+      this.previewMode = null;
       this.primaryActionOperation = null;
       this.mergeSheetMetadataLoading = false;
       this.mergeSheetMetadataPromise = null;
@@ -336,6 +337,51 @@
       return preview;
     }
 
+    getPreviewCacheKey(item, merge = false) {
+      const mode = merge ? 'merge' : 'separate';
+      let sheetIndex = 0;
+      if (merge) {
+        const metadata = this.getMergeSheetMetadata(item);
+        sheetIndex = Array.isArray(metadata) && metadata.length > 0
+          ? this.normalizeMergeSheetIndex(item, metadata.length)
+          : this.getStoredMergeSheetIndex(item);
+      }
+      return `${this.fileVersion}:${mode}:${sheetIndex}`;
+    }
+
+    getCachedPreview(item, cacheKey) {
+      return item?.previewCache && Object.prototype.hasOwnProperty.call(item.previewCache, cacheKey)
+        ? item.previewCache[cacheKey]
+        : null;
+    }
+
+    cachePreview(item, cacheKey, preview) {
+      if (!item) return preview;
+      if (!item.previewCache || typeof item.previewCache !== 'object') {
+        item.previewCache = {};
+      }
+      item.previewCache[cacheKey] = preview;
+      return preview;
+    }
+
+    invalidatePreviewCache(item, mode = null) {
+      if (!item?.previewCache || typeof item.previewCache !== 'object') return;
+      if (!mode) {
+        item.previewCache = {};
+        return;
+      }
+      const modePrefix = `:${mode}:`;
+      for (const key of Object.keys(item.previewCache)) {
+        if (key.includes(modePrefix)) delete item.previewCache[key];
+      }
+    }
+
+    restorePreviewSummary(item, preview) {
+      if (item?.parsed) return;
+      const exactSummary = this.buildStatsFromPreview(preview);
+      if (exactSummary) item.summaryStats = exactSummary;
+    }
+
     /**
      * Persist a FileSystemFileHandle for a file entry into IndexedDB.
      * The handleId is stored on the entry for later retrieval.
@@ -546,7 +592,11 @@
 
     async hydrateMergeSheetMetadata() {
       if (this.getOpenMode() !== 'merge') return;
-      if (this.mergeSheetMetadataPromise) return this.mergeSheetMetadataPromise;
+      if (this.mergeSheetMetadataPromise) {
+        // Re-run after the in-flight pass settles so files added mid-load
+        // still receive worksheet metadata and selectors.
+        return this.mergeSheetMetadataPromise.then(() => this.hydrateMergeSheetMetadata());
+      }
 
       const pendingItems = this.files.filter((item) =>
         item && !item.parsed && item.file &&
@@ -629,11 +679,25 @@
     }
 
     async ensurePreviewSample(item, { merge = false } = {}) {
-      if (!merge && item?.previewSample) return item.previewSample;
+      let cacheKey = this.getPreviewCacheKey(item, merge);
+      let cachedPreview = this.getCachedPreview(item, cacheKey);
+      if (cachedPreview) {
+        this.restorePreviewSummary(item, cachedPreview);
+        return cachedPreview;
+      }
       if (merge && !item?.parsed && this.getStoredMergeSheetIndex(item) !== 0) {
         await this.ensureParsedEntry(item, { preserveFormatting: true }, 'merge preview');
+        cacheKey = this.getPreviewCacheKey(item, merge);
+        cachedPreview = this.getCachedPreview(item, cacheKey);
+        if (cachedPreview) {
+          this.restorePreviewSummary(item, cachedPreview);
+          return cachedPreview;
+        }
       }
       if (item?.parsed) {
+        cacheKey = this.getPreviewCacheKey(item, merge);
+        cachedPreview = this.getCachedPreview(item, cacheKey);
+        if (cachedPreview) return cachedPreview;
         const sourceSheet = merge
           ? (this.getSelectedMergeSheet(item) || {})
           : (item.parsed.sheets[0] || {});
@@ -673,10 +737,8 @@
           },
         };
         if (merge) this.applySelectedMergePreviewMetadata(item, preview);
-        item.previewSample = preview;
-        return preview;
+        return this.cachePreview(item, cacheKey, preview);
       }
-      if (item?.previewSample) return item.previewSample;
       if (!item?.file) {
         throw new Error(`Re-add ${item?.name || 'this file'} to preview it`);
       }
@@ -690,13 +752,20 @@
         previewOptions.sheetIndex = selectedIndex;
       }
 
+      cacheKey = this.getPreviewCacheKey(item, merge);
+      cachedPreview = this.getCachedPreview(item, cacheKey);
+      if (cachedPreview) {
+        this.restorePreviewSummary(item, cachedPreview);
+        return cachedPreview;
+      }
+
       const preview = await this.runProcessingTask(
         'preview',
         { file: item.file, options: previewOptions },
         () => Parser.preview(item.file, previewOptions)
       );
       if (merge) this.applySelectedMergePreviewMetadata(item, preview);
-      item.previewSample = preview;
+      this.cachePreview(item, cacheKey, preview);
       const exactSummary = this.buildStatsFromPreview(preview);
       if (exactSummary) {
         item.summaryStats = exactSummary;
@@ -2161,7 +2230,7 @@
       if (clampedIndex === item.selectedMergeSheetIndex) return;
 
       item.selectedMergeSheetIndex = clampedIndex;
-      item.previewSample = null;
+      this.invalidatePreviewCache(item, 'merge');
       item.summaryStats = null;
       this.markFilesChanged();
       this.hidePreview();
@@ -2425,9 +2494,16 @@
     /** Enable/disable and populate the dropdown based on open mode. */
     updateOpenModeState() {
       const isMerge = this.getOpenMode() === 'merge';
+      const nextPreviewMode = isMerge ? 'merge' : 'separate';
+      const changedFromMergeToSeparate = this.previewMode === 'merge' && !isMerge;
+      this.previewMode = nextPreviewMode;
       this.previewSelect.disabled = isMerge || this.files.length === 0;
       this.smartMappingOption.classList.toggle('hidden', !isMerge);
       if (!isMerge) {
+        if (changedFromMergeToSeparate) {
+          for (const item of this.files) delete item.summaryStats;
+          this._updateSummaryCards();
+        }
         this.mappingReview.classList.add('hidden');
         this.customMappingOption.classList.add('hidden');
         this.customMappingList.innerHTML = '';
@@ -3610,7 +3686,7 @@
           } else if (hasSessionExcel) {
             // All Excel files are session-restored — no raw data available
             this.setStatus(
-              'Re-add your files to preserve formatting (session-restored files lose raw data)',
+              'Re-add your files to preserve cell formatting (session-restored files lose raw data)',
               'warning'
             );
             return;
