@@ -128,6 +128,18 @@ npm run setup
 
 ---
 
+## Packaging
+
+To create a production ZIP for Chrome Web Store upload:
+
+```bash
+npm run package
+```
+
+This runs setup, validates all manifest.json file references, and produces a versioned ZIP under `dist/` (e.g., `dist/drag-to-sheets-1.0.0.zip`). The archive includes only production files and extracts to the correct folder structure for loading as an unpacked extension.
+
+---
+
 ## Chrome APIs Used
 
 - `sidePanel` — side panel management

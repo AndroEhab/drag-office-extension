@@ -5,6 +5,7 @@
   "description": "Chrome extension — drag spreadsheet files into Google Sheets",
   "scripts": {
     "setup": "node setup.js",
+    "package": "node scripts/package.js",
     "test": "jest --verbose"
   },
   "devDependencies": {
