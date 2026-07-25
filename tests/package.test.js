@@ -75,8 +75,8 @@ describe('collectProductionFiles', () => {
     });
   });
 
-  test('total file count is 18', () => {
-    expect(files.length).toBe(18);
+    test('total file count is 20', () => {
+      expect(files.length).toBe(20);
   });
 });
 
@@ -125,7 +125,9 @@ describe('release ZIP', () => {
   });
 
   test('contains images/ at root', () => {
-    expect(zipEntries).toContain('images/logo-icon.png');
+    expect(zipEntries).toContain('images/icon-16.png');
+    expect(zipEntries).toContain('images/icon-48.png');
+    expect(zipEntries).toContain('images/icon-128.png');
     expect(zipEntries).toContain('images/logo-horizontal.png');
   });
 
@@ -182,7 +184,7 @@ describe('release ZIP', () => {
   });
 
   test('total ZIP entries matches production file count', () => {
-    expect(zipEntries.length).toBe(18);
+    expect(zipEntries.length).toBe(20);
   });
 
   test('normalizes entry timestamps for reproducible archives', () => {

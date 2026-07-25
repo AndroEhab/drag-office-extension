@@ -1,5 +1,5 @@
 const path = require('path');
-const { getManifestReferencedFiles, validateFilesExist } = require('../scripts/validate-manifest');
+const { getManifestReferencedFiles, validateFilesExist, validateIconSizes } = require('../scripts/validate-manifest');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -11,7 +11,9 @@ describe('getManifestReferencedFiles', () => {
 
   test('returns icon files from icons field', () => {
     const files = getManifestReferencedFiles(ROOT);
-    expect(files).toContain('images/logo-icon.png');
+    expect(files).toContain('images/icon-16.png');
+    expect(files).toContain('images/icon-48.png');
+    expect(files).toContain('images/icon-128.png');
   });
 
   test('returns background service worker', () => {
@@ -40,5 +42,33 @@ describe('validateFilesExist', () => {
   test('reports multiple missing files', () => {
     const missing = validateFilesExist(ROOT, ['a.test', 'b.test']);
     expect(missing).toEqual(['a.test', 'b.test']);
+  });
+});
+
+describe('validateIconSizes', () => {
+  test('returns empty array when all icons match expected dimensions', () => {
+    const errors = validateIconSizes(ROOT);
+    expect(errors).toEqual([]);
+  });
+
+  test('reports wrong dimensions for a non-square icon', () => {
+    const manifestPath = path.join(ROOT, 'manifest.json');
+    const original = require(manifestPath);
+    const patched = JSON.parse(JSON.stringify(original));
+    patched.icons['16'] = 'images/logo-horizontal.png';
+
+    const restore = jest.spyOn(require('fs'), 'readFileSync').mockImplementationOnce((fp) => {
+      if (fp === manifestPath) return JSON.stringify(patched, null, 2);
+      return require('fs').readFileSync(fp);
+    });
+
+    try {
+      const errors = validateIconSizes(ROOT);
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+      expect(errors[0].file).toBe('images/logo-horizontal.png');
+      expect(errors[0].expected).toBe('16\u00D716');
+    } finally {
+      restore.mockRestore();
+    }
   });
 });
