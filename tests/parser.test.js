@@ -215,6 +215,57 @@ describe('Parser', () => {
     });
   });
 
+  describe('UTF-8 BOM handling for delimited files', () => {
+    const cases = [
+      [
+        'BOM before the first header',
+        'header.csv',
+        '\uFEFFname\nAlice',
+        [['name'], ['Alice']],
+      ],
+      [
+        'BOM with comma-delimited CSV',
+        'comma.csv',
+        '\uFEFFname,age\nAlice,30',
+        [['name', 'age'], ['Alice', '30']],
+      ],
+      [
+        'BOM with semicolon-delimited CSV',
+        'semicolon.csv',
+        '\uFEFFname;age\nAlice;30',
+        [['name', 'age'], ['Alice', '30']],
+      ],
+      [
+        'BOM with TSV',
+        'data.tsv',
+        '\uFEFFname\tage\nAlice\t30',
+        [['name', 'age'], ['Alice', '30']],
+      ],
+      [
+        'no BOM',
+        'plain.csv',
+        'name,age\nAlice,30',
+        [['name', 'age'], ['Alice', '30']],
+      ],
+      [
+        'BOM inside a later quoted field',
+        'quoted.csv',
+        'name,note\nAlice,"kept\uFEFFinside"',
+        [['name', 'note'], ['Alice', 'kept\uFEFFinside']],
+      ],
+    ];
+
+    test.each(cases)('%s is handled by full parsing', async (_label, name, content, expected) => {
+      const result = await Parser.parse(makeFile(name, content));
+      expect(result.sheets[0].data).toEqual(expected);
+    });
+
+    test.each(cases)('%s is handled by preview parsing', async (_label, name, content, expected) => {
+      const result = await Parser.preview(makeFile(name, content), { sampleRows: 10 });
+      expect(result.sheets[0].data).toEqual(expected);
+    });
+  });
+
   describe('preview CSV', () => {
     test('returns sampled rows for large csv previews', async () => {
       const rows = ['a,b'];
@@ -292,6 +343,84 @@ describe('Parser', () => {
       expect(result.sheets[0].data).toEqual([
         ['a', 'b'],
         ['1', '2'],
+      ]);
+    });
+
+    test('detects standard comma CSV', async () => {
+      const result = await Parser.parse(makeFile('standard.csv', 'name,age,city\nAlice,30,Cairo\nBob,31,Giza'));
+      expect(result.sheets[0].data).toEqual([
+        ['name', 'age', 'city'],
+        ['Alice', '30', 'Cairo'],
+        ['Bob', '31', 'Giza'],
+      ]);
+    });
+
+    test('ignores quoted commas in semicolon-delimited CSV', async () => {
+      const content = [
+        'name;note;status',
+        '"Smith, John";"Likes apples, pears";active',
+        '"Doe, Jane";"Uses commas, often";inactive',
+      ].join('\n');
+      const result = await Parser.parse(makeFile('quoted-commas.csv', content));
+      expect(result.sheets[0].data).toEqual([
+        ['name', 'note', 'status'],
+        ['Smith, John', 'Likes apples, pears', 'active'],
+        ['Doe, Jane', 'Uses commas, often', 'inactive'],
+      ]);
+    });
+
+    test('detects tabs when values contain commas', async () => {
+      const content = 'name\tnote\nAlice\tone,two\nBob\tthree,four';
+      const result = await Parser.parse(makeFile('commas-in-tabs.tsv', content));
+      expect(result.sheets[0].data).toEqual([
+        ['name', 'note'],
+        ['Alice', 'one,two'],
+        ['Bob', 'three,four'],
+      ]);
+    });
+
+    test('keeps quoted multiline fields in the same record for detection', async () => {
+      const content = 'id,notes\n1,"first line, with comma\nsecond line"\n2,"last, value"';
+      const result = await Parser.parse(makeFile('multiline-detection.csv', content));
+      expect(result.sheets[0].data).toEqual([
+        ['id', 'notes'],
+        ['1', 'first line, with comma\nsecond line'],
+        ['2', 'last, value'],
+      ]);
+    });
+
+    test('falls back to comma for single-column files', async () => {
+      const result = await Parser.parse(makeFile('single-column.csv', 'header\nvalue one\nvalue two'));
+      expect(result.sheets[0].data).toEqual([
+        ['header'],
+        ['value one'],
+        ['value two'],
+      ]);
+    });
+
+    test('keeps comma as the safe choice for inconsistent malformed data', async () => {
+      const content = 'a,b,c\n1,2\n3,4,5,6';
+      const result = await Parser.parse(makeFile('malformed.csv', content));
+      expect(result.sheets[0].data).toEqual([
+        ['a', 'b', 'c', ''],
+        ['1', '2', '', ''],
+        ['3', '4', '5', '6'],
+      ]);
+    });
+
+    test('falls back to comma for empty input', async () => {
+      const result = await Parser.parse(makeFile('empty.csv', ''));
+      expect(result.sheets[0].data).toEqual([]);
+    });
+
+    test('chooses the structurally consistent delimiter with mixed delimiters', async () => {
+      const content = 'a,b\n1,2;extra\n3,4\n5,6;extra';
+      const result = await Parser.parse(makeFile('mixed-delimiters.csv', content));
+      expect(result.sheets[0].data).toEqual([
+        ['a', 'b'],
+        ['1', '2;extra'],
+        ['3', '4'],
+        ['5', '6;extra'],
       ]);
     });
   });
