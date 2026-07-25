@@ -13,28 +13,28 @@
 </head>
 <body>
   <h1>Privacy Policy for Drag to Sheets</h1>
-  <p><strong>Last updated:</strong> July 2025</p>
+  <p><strong>Last updated:</strong> July 2026</p>
 
   <h2>1. Data Collection and Processing</h2>
-  <p>Drag to Sheets processes spreadsheet files (CSV, TSV, XLSX, XLS) that you provide through drag-and-drop, file picker, or URL import. All file parsing, cleaning, and merging happens <strong>locally on your device</strong>. Your data is never sent to our servers or any third-party service except as described below.</p>
+  <p>Drag to Sheets processes spreadsheet files (CSV, TSV, XLSX, XLS) that you provide through drag-and-drop, file picker, or URL import. All file parsing, previewing, cleaning, merging, and temporary session persistence happen <strong>locally on your device</strong>. Your data is never sent to our servers or any third-party service except as described below.</p>
 
   <h2>2. Google Sheets and Google Drive Integration</h2>
-  <p>When you click "Open in Sheets", your file data is uploaded to Google Sheets (and optionally Google Drive for native Excel conversion) using the official Google Sheets and Drive APIs. This extension uses OAuth 2.0 authentication via your Google account to create and populate spreadsheets on your behalf. The OAuth scopes requested are:</p>
+  <p>Your files and processed data are sent to Google only after you choose the <strong>Open in Sheets</strong> action. When you click this button, the extension creates a Google Sheets spreadsheet in your Google account using the official Google Sheets API. For native Excel files (XLSX, XLS) and CSV/TSV files, the original file may be uploaded through the Google Drive API, which converts it to Google Sheets format. Parsed data (without a raw file) is written directly to the spreadsheet via the Sheets API. OAuth 2.0 authentication via your Google account is used, requesting the following scopes:</p>
   <ul>
     <li><strong>spreadsheets</strong> — to create and edit Google Sheets spreadsheets</li>
     <li><strong>drive.file</strong> — to upload files to your Google Drive (only files created by this extension)</li>
   </ul>
-  <p>No data is stored on Google Drive or Sheets without your explicit action. Files are only uploaded when you click the upload button.</p>
 
   <h2>3. URL Import</h2>
-  <p>The URL import feature fetches spreadsheet files from URLs you provide. The extension makes a direct request from your browser to the specified URL. No intermediary servers are involved. The fetched data is processed locally and only leaves your device when you choose to open it in Google Sheets.</p>
+  <p>The URL import feature fetches spreadsheet files from URLs you provide. The extension requests your permission to access the specific HTTPS origin you submit (e.g., <code>https://example.com</code>) and then makes a direct request from your browser to that address. No intermediary servers are involved. The fetched data is processed locally and only leaves your device when you choose to open it in Google Sheets.</p>
 
   <h2>4. Data Storage</h2>
-  <p>To provide session continuity, the extension stores your current file list and preferences using Chrome's built-in storage APIs:</p>
+  <p>To provide session continuity, the extension stores your current file list and preferences on your device using Chrome's built-in storage and IndexedDB:</p>
   <ul>
-    <li><strong>chrome.storage.session</strong> — holds current files and parsing state (cleared when Chrome restarts)</li>
-    <li><strong>chrome.storage.local</strong> — holds your preferences (cleaning options, open mode, mappings)</li>
-    <li><strong>IndexedDB</strong> — used as a fallback for large file batches when session storage quota is exceeded</li>
+    <li><strong>chrome.storage.session</strong> — holds current file data and parsing state (cleared when Chrome restarts)</li>
+    <li><strong>chrome.storage.local</strong> — holds your preferences (cleaning options, open mode, column mappings)</li>
+    <li><strong>IndexedDB</strong> — stores file handles for session restoration across restarts, and serves as a fallback for large file batches when session storage quota is exceeded</li>
+    <li><strong>File system handles</strong> — stored in IndexedDB (via the structured clone algorithm) to re-access dropped files on subsequent sessions</li>
   </ul>
   <p>All stored data remains on your device. No analytics, telemetry, or tracking code is included in this extension.</p>
 
@@ -47,9 +47,12 @@
   <p>No other third-party services receive your data.</p>
 
   <h2>6. Data Retention</h2>
-  <p>Parsed file data in <code>chrome.storage.session</code> is automatically cleared when the browser restarts. IndexedDB session data can be cleared by clearing the extension's data through Chrome's settings. Google Sheets spreadsheets you create remain in your Google account until you delete them.</p>
+  <p>Parsed file data in <code>chrome.storage.session</code> is automatically cleared when the browser restarts. IndexedDB data (session fallback and stored file handles) can be cleared through Chrome's extension settings. Google Sheets spreadsheets you create remain in your Google account until you delete them.</p>
 
-  <h2>7. Contact</h2>
+  <h2>7. Limited Use</h2>
+  <p>The use of information received from Google APIs will adhere to the Chrome Web Store User Data Policy, including the Limited Use requirements.</p>
+
+  <h2>8. Contact</h2>
   <p>If you have questions about this privacy policy, contact us at <a href="mailto:support@dragtosheets.app">support@dragtosheets.app</a>.</p>
 </body>
 </html>

@@ -1278,7 +1278,9 @@
         const contentLength = response.headers.get('content-length');
         if (contentLength !== null) {
           const declaredSize = parseInt(contentLength, 10);
-          if (!isNaN(declaredSize) && declaredSize > MAX_IMPORT_SIZE_BYTES) {
+          if (!Number.isNaN(declaredSize) && declaredSize > MAX_IMPORT_SIZE_BYTES) {
+            controller.abort();
+            response.body?.cancel().catch(() => {});
             throw new Error(
               `File too large (${this.formatBytes(declaredSize)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
             );

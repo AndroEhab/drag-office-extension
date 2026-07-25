@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drag to Sheets — Chrome Extension</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 680px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.7; color: #333; }
+    h1 { font-size: 1.6rem; display: flex; align-items: center; gap: 0.6rem; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.5rem; }
+    h1 img { width: 32px; height: 32px; }
+    h2 { font-size: 1.15rem; margin-top: 2rem; }
+    ul { padding-left: 1.2rem; }
+    li { margin-bottom: 0.3rem; }
+    code { background: #f4f4f4; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+    .tag { display: inline-block; background: #e8f0fe; color: #1a73e8; font-size: 0.8rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 3px; margin-right: 0.3rem; }
+    .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e0e0e0; font-size: 0.9rem; color: #666; }
+    a { color: #1a73e8; }
+  </style>
+</head>
+<body>
+  <h1>
+    <img src="images/logo-icon.png" alt="" width="32" height="32">
+    Drag to Sheets
+  </h1>
+  <p>Drag spreadsheet files into a Chrome side panel, clean them up, and open them in Google Sheets — all without uploading your data until you're ready.</p>
+
+  <h2>Supported file types</h2>
+  <ul>
+    <li><span class="tag">CSV</span> <code>.csv</code></li>
+    <li><span class="tag">TSV</span> <code>.tsv</code></li>
+    <li><span class="tag">Excel</span> <code>.xlsx</code> &amp; <code>.xls</code></li>
+  </ul>
+
+  <h2>How it works</h2>
+  <p><strong>File parsing, previewing, cleaning, and merging all happen locally on your device.</strong> Your data never leaves your computer unless you take action.</p>
+  <p>When you click <strong>Open in Sheets</strong>, the extension sends your data to Google via the official Sheets and Drive APIs to create a spreadsheet in your Google account. No data is ever sent to our servers.</p>
+
+  <h2>Built-in cleaning tools</h2>
+  <ul>
+    <li>Trim whitespace</li>
+    <li>Remove empty rows and columns</li>
+    <li>Remove duplicate rows</li>
+    <li>Fix number formatting</li>
+    <li>Normalize dates</li>
+    <li>Normalize headers</li>
+  </ul>
+
+  <h2>Privacy</h2>
+  <p>Your data stays private. No analytics, telemetry, or tracking code is included. See the <a href="privacy.html">privacy policy</a> for full details.</p>
+
+  <div class="footer">
+    <p><a href="privacy.html">Privacy Policy</a> &middot; <a href="mailto:support@dragtosheets.app">support@dragtosheets.app</a></p>
+  </div>
+</body>
+</html>

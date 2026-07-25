@@ -3481,12 +3481,20 @@ describe('DragToSheetsApp', () => {
       delete global.fetch;
     });
 
-    test('oversized Content-Length rejects immediately', async () => {
+    test('oversized Content-Length rejects immediately without calling getReader', async () => {
       const app = await createApp();
       app.urlInput.value = 'https://example.com/data.csv';
-      global.fetch = jest.fn().mockResolvedValue(
-        makeMockResponse({ chunks: [], contentLength: 60 * 1024 * 1024 })
-      );
+      const getReader = jest.fn();
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: jest.fn((name) => {
+            if (name.toLowerCase() === 'content-length') return String(60 * 1024 * 1024);
+            return null;
+          }),
+        },
+        body: { cancel: jest.fn().mockResolvedValue(undefined), getReader },
+      });
 
       await app.importFromUrl();
 
@@ -3494,6 +3502,7 @@ describe('DragToSheetsApp', () => {
       expect(app.loadingText.textContent).toContain('50 MB');
       expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
       expect(app.urlFetchBtn.disabled).toBe(false);
+      expect(getReader).not.toHaveBeenCalled();
 
       delete global.fetch;
     });
