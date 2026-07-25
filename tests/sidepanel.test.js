@@ -16,6 +16,7 @@ global.Parser = {
   ),
   isExcelSupported: jest.fn(() => true),
   parse: jest.fn(),
+  getWorkbookMetadata: jest.fn(),
   preview: jest.fn(),
   hasTypedCellMetadata: jest.fn((parsed) => {
     if (!parsed || !Array.isArray(parsed.sheets)) return false;
@@ -1854,6 +1855,55 @@ describe('DragToSheetsApp', () => {
       };
     }
 
+    function makeDistinctMergeFiles() {
+      return [
+        {
+          name: 'master.xlsx',
+          ext: 'xlsx',
+          selectedMergeSheetIndex: 1,
+          parsed: {
+            sheets: [
+              {
+                name: 'First sheet',
+                data: [
+                  ['First-only', 'First-wide', 'First-extra'],
+                  ['a', 'b', 'c'],
+                  ['d', 'e', 'f'],
+                  ['g', 'h', 'i'],
+                ],
+              },
+              {
+                name: 'Selected master',
+                data: [['Master selected', 'Selected value'], ['m1', 'v1']],
+              },
+            ],
+          },
+        },
+        {
+          name: 'source.xlsx',
+          ext: 'xlsx',
+          selectedMergeSheetIndex: 1,
+          parsed: {
+            sheets: [
+              {
+                name: 'First source',
+                data: [
+                  ['Source first', 'Source extra', 'Source wide', 'Source fourth'],
+                  ['a', 'b', 'c', 'd'],
+                  ['e', 'f', 'g', 'h'],
+                  ['i', 'j', 'k', 'l'],
+                ],
+              },
+              {
+                name: 'Selected source',
+                data: [['Source selected'], ['s1'], ['s2']],
+              },
+            ],
+          },
+        },
+      ];
+    }
+
     test('new file entries default to worksheet index 0', async () => {
       const app = await createApp();
       const parsed = makeParsedWorkbook();
@@ -1999,6 +2049,128 @@ describe('DragToSheetsApp', () => {
       expect(rawFiles.map((file) => file.sheets[0].name)).toEqual(['Sheet2', 'Sheet2']);
     });
 
+    test('exact merge previews use each file selected worksheet', async () => {
+      const app = await createApp();
+      app.files = makeDistinctMergeFiles();
+
+      await app.getMergedProcessedData();
+
+      const [rawFiles] = Merger.merge.mock.calls.at(-1);
+      expect(rawFiles.map((file) => file.sheets[0].data[0])).toEqual([
+        ['Master selected', 'Selected value'],
+        ['Source selected'],
+      ]);
+      expect(rawFiles.map((file) => file.sheets[0].data[1])).toEqual([
+        ['m1', 'v1'],
+        ['s1'],
+      ]);
+    });
+
+    test('responsive merge previews use each file selected worksheet', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.files = makeDistinctMergeFiles();
+
+      await app.getResponsiveMergePreview(app.getCleaningOptions());
+
+      const [rawFiles] = Merger.merge.mock.calls.at(-1);
+      expect(rawFiles.map((file) => file.sheets[0].data[0])).toEqual([
+        ['Master selected', 'Selected value'],
+        ['Source selected'],
+      ]);
+    });
+
+    test('smart-mapping detection inspects selected worksheet headers', async () => {
+      const app = await createApp();
+      app.files = makeDistinctMergeFiles();
+
+      await app.detectSmartMappings(false);
+
+      const [rawFiles] = Merger.detectMappings.mock.calls.at(-1);
+      expect(rawFiles.map((file) => file.sheets[0].data[0])).toEqual([
+        ['Master selected', 'Selected value'],
+        ['Source selected'],
+      ]);
+    });
+
+    test('sampled smart-mapping detection inspects selected worksheet headers', async () => {
+      const app = await createApp();
+      app.files = makeDistinctMergeFiles();
+
+      await app.detectSmartMappings(true);
+
+      const [rawFiles] = Merger.detectMappings.mock.calls.at(-1);
+      expect(rawFiles.map((file) => file.sheets[0].data[0])).toEqual([
+        ['Master selected', 'Selected value'],
+        ['Source selected'],
+      ]);
+    });
+
+    test('custom mapping choices come from selected worksheets', async () => {
+      const app = await createApp();
+      app.files = makeDistinctMergeFiles();
+
+      const context = await app.buildCustomMappingContextForCurrentFiles();
+
+      expect(context.masterGroup.headers).toEqual(['Master selected', 'Selected value']);
+      expect(context.nonMasterGroups[0].headers).toEqual(['Source selected']);
+      expect(context.defaultTargetHeaders).toEqual(['Master selected', 'Selected value']);
+      expect(context.availableTargetsBySource.get('Source selected')).toEqual([
+        'Master selected',
+        'Selected value',
+      ]);
+    });
+
+    test('merge summary cards reflect selected worksheet dimensions', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.files = makeDistinctMergeFiles();
+
+      app._updateSummaryCards();
+
+      expect(document.getElementById('summary-rows').textContent).toBe('3');
+      expect(document.getElementById('summary-cols').textContent).toBe('2');
+    });
+
+    test('selector changes invalidate stale async previews and cleanup summaries', async () => {
+      const app = await createApp();
+      app.files = makeDistinctMergeFiles();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      const deferred = new Promise((resolve) => {
+        app.resolveStaleMerge = resolve;
+      });
+      const mergeSpy = jest.spyOn(app, 'getMergedProcessedData')
+        .mockReturnValueOnce(deferred)
+        .mockResolvedValue({ sheets: [{ name: 'Merged', data: [['new']] }] });
+      jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      jest.spyOn(app, 'updateCustomMappingVisibility').mockResolvedValue();
+
+      const staleRefresh = app.refreshPreview();
+      for (let i = 0; i < 6 && mergeSpy.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(mergeSpy).toHaveBeenCalled();
+
+      app.renderPreviewTable([['OLD']], 'Merged', {}, [], {
+        stats: { trimmedValues: 1 },
+        scope: 'exact',
+        evaluatedOperations: { trim: true },
+      });
+      app.previewPanel.classList.remove('hidden');
+      app.cleanupResults.classList.remove('hidden');
+      app.cleanupResultsList.innerHTML = '<li>old cleanup</li>';
+
+      app.handleMergeSheetSelection(0, '0');
+      expect(app.previewPanel.classList.contains('hidden')).toBe(true);
+      expect(app.cleanupResults.classList.contains('hidden')).toBe(true);
+      expect(app.cleanupResultsList.innerHTML).toBe('');
+
+      app.resolveStaleMerge({ sheets: [{ name: 'Merged', data: [['OLD']] }] });
+      await staleRefresh;
+
+      expect(app.previewTable.textContent).not.toContain('OLD');
+    });
+
     test('separate upload still includes every worksheet', async () => {
       const app = await createApp();
       const item = {
@@ -2018,6 +2190,413 @@ describe('DragToSheetsApp', () => {
 
       const sheets = GoogleAPI.createSpreadsheet.mock.calls[0][1];
       expect(sheets.map((sheet) => sheet.name)).toEqual(['Sheet1', 'Sheet2']);
+    });
+  });
+
+  // ---- Worksheet-selection regression suite ----
+
+  describe('worksheet-selection regression', () => {
+    function makeRegressionSheet(name, data, stylePrefix = name) {
+      const cellMeta = data.map((row) => row.map((value) => {
+        if (value === '') return { type: 'empty' };
+        if (typeof value === 'number') return { type: 'number', value };
+        return { type: 'string', value: String(value) };
+      }));
+      const styles = data.map((row, rowIndex) => row.map((_, colIndex) => ({
+        marker: `${stylePrefix}-${rowIndex}-${colIndex}`,
+      })));
+      return { name, data, cellMeta, styles };
+    }
+
+    function makeRegressionFiles({ selectedA = 0, selectedB = 1 } = {}) {
+      return [
+        {
+          name: 'alpha.xlsx',
+          ext: 'xlsx',
+          file: new File(['alpha'], 'alpha.xlsx'),
+          selectedMergeSheetIndex: selectedA,
+          parsed: {
+            sheets: [
+              makeRegressionSheet(
+                'Alpha zero',
+                [['Alpha zero id', 'Alpha zero value'], ['a0', 'alpha-zero']],
+                'alpha-first'
+              ),
+              makeRegressionSheet(
+                'Alpha one',
+                [['Alpha one id', 'Alpha one value'], ['a1', 'alpha-one']],
+                'alpha-second'
+              ),
+            ],
+            themeColors: ['#112233'],
+          },
+        },
+        {
+          name: 'beta.xlsx',
+          ext: 'xlsx',
+          file: new File(['beta'], 'beta.xlsx'),
+          selectedMergeSheetIndex: selectedB,
+          parsed: {
+            sheets: [
+              makeRegressionSheet(
+                'Beta zero',
+                [['Beta zero id', 'Beta zero value'], ['b0', 'beta-zero']],
+                'beta-first'
+              ),
+              makeRegressionSheet(
+                'Beta one',
+                [['Beta one id', 'Beta one value'], ['b1', 'beta-one']],
+                'beta-second'
+              ),
+            ],
+            themeColors: ['#445566'],
+          },
+        },
+      ];
+    }
+
+    function toStoredFiles(files) {
+      return files.map((item) => ({
+        name: item.name,
+        ext: item.ext,
+        size: item.file?.size || 0,
+        selectedMergeSheetIndex: item.selectedMergeSheetIndex,
+        sheets: item.parsed.sheets.map(({ name, data, cellMeta }) => ({ name, data, cellMeta })),
+      }));
+    }
+
+    function enterMergeMode(app) {
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.updateOpenModeState();
+    }
+
+    test('merges worksheet zero from one XLSX and worksheet one from another', async () => {
+      const app = await createApp();
+      app.files = makeRegressionFiles({ selectedA: 0, selectedB: 0 });
+      enterMergeMode(app);
+
+      const selectors = document.querySelectorAll('.merge-sheet-select');
+      expect(selectors).toHaveLength(2);
+      selectors[0].value = '0';
+      selectors[0].dispatchEvent(new Event('change'));
+      selectors[1].value = '1';
+      selectors[1].dispatchEvent(new Event('change'));
+
+      await app.getMergedProcessedData();
+
+      const [rawFiles] = Merger.merge.mock.calls.at(-1);
+      expect(app.files.map((item) => item.selectedMergeSheetIndex)).toEqual([0, 1]);
+      expect(rawFiles.map((file) => file.sheets[0].name)).toEqual(['Alpha zero', 'Beta one']);
+      expect(rawFiles.map((file) => file.sheets[0].data[1][0])).toEqual(['a0', 'b1']);
+    });
+
+    test('changing a selection after smart mappings were approved resets approval state', async () => {
+      const app = await createApp();
+      app.files = makeRegressionFiles();
+      enterMergeMode(app);
+      app.smartMappingApproved = true;
+      app.smartMappingDeclined = true;
+
+      jest.spyOn(app, 'updateCustomMappingVisibility').mockResolvedValue();
+      jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      jest.spyOn(app, 'saveFilesSession').mockImplementation(() => {});
+
+      const selector = document.querySelector('#merge-sheet-select-0');
+      selector.value = '1';
+      selector.dispatchEvent(new Event('change'));
+
+      expect(app.files[0].selectedMergeSheetIndex).toBe(1);
+      expect(app.smartMappingApproved).toBe(false);
+      expect(app.smartMappingDeclined).toBe(false);
+    });
+
+    test('custom mappings become invalid when a source worksheet changes', async () => {
+      const app = await createApp();
+      const masterSheet = makeRegressionSheet(
+        'Master',
+        [['MasterTarget'], ['m1']],
+        'master'
+      );
+      const sourceSheetWithNewHeader = makeRegressionSheet(
+        'Source zero',
+        [['NewSource'], ['new']],
+        'source-first'
+      );
+      const sourceSheetWithOldHeader = makeRegressionSheet(
+        'Source one',
+        [['OldSource'], ['old']],
+        'source-second'
+      );
+      app.files = [
+        {
+          name: 'master.xlsx',
+          ext: 'xlsx',
+          parsed: { sheets: [masterSheet] },
+          selectedMergeSheetIndex: 0,
+        },
+        {
+          name: 'source.xlsx',
+          ext: 'xlsx',
+          parsed: { sheets: [sourceSheetWithNewHeader, sourceSheetWithOldHeader] },
+          selectedMergeSheetIndex: 1,
+        },
+      ];
+      enterMergeMode(app);
+      app.smartMappingCheckbox.checked = true;
+      app.customMappings = [{ from: 'OldSource', to: 'MasterTarget' }];
+      jest.spyOn(app, 'savePreferences').mockImplementation(() => {});
+      jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      jest.spyOn(app, 'saveFilesSession').mockImplementation(() => {});
+
+      await app.updateCustomMappingVisibility();
+      expect(app.customMappings).toEqual([{ from: 'OldSource', to: 'MasterTarget' }]);
+
+      app.handleMergeSheetSelection(1, '0');
+      await app.updateCustomMappingVisibility();
+      await flushPromises();
+
+      expect(app.customMappings).toEqual([]);
+    });
+
+    test('rapid consecutive selection changes leave only the current preview visible', async () => {
+      const app = await createApp();
+      app.files = makeRegressionFiles({ selectedA: 0, selectedB: 1 });
+      enterMergeMode(app);
+      jest.spyOn(app, 'updateCustomMappingVisibility').mockResolvedValue();
+      jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      jest.spyOn(app, 'saveFilesSession').mockImplementation(() => {});
+
+      let resolveStale;
+      const staleResult = new Promise((resolve) => {
+        resolveStale = resolve;
+      });
+      const mergeSpy = jest.spyOn(app, 'getMergedProcessedData')
+        .mockReturnValueOnce(staleResult)
+        .mockResolvedValueOnce({
+          sheets: [{ name: 'Merged', data: [['CURRENT']] }],
+        });
+
+      const staleRefresh = app.refreshPreview();
+      for (let i = 0; i < 6 && mergeSpy.mock.calls.length === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(mergeSpy).toHaveBeenCalledTimes(1);
+
+      app.previewTable.textContent = 'STALE';
+      app.previewPanel.classList.remove('hidden');
+      app.cleanupResults.classList.remove('hidden');
+      app.cleanupResultsList.innerHTML = '<li>stale cleanup</li>';
+      app.handleMergeSheetSelection(0, '1');
+      app.handleMergeSheetSelection(0, '0');
+
+      resolveStale({ sheets: [{ name: 'Merged', data: [['STALE']] }] });
+      await staleRefresh;
+
+      expect(app.previewTable.textContent).not.toContain('STALE');
+      expect(app.cleanupResults.classList.contains('hidden')).toBe(true);
+
+      await app.refreshPreview();
+      expect(app.previewTable.textContent).toContain('CURRENT');
+      expect(mergeSpy).toHaveBeenCalledTimes(2);
+    });
+
+    test('persists selected worksheets through side-panel restoration', async () => {
+      const sourceFiles = makeRegressionFiles({ selectedA: 1, selectedB: 0 });
+      chrome.storage.session.get.mockResolvedValue({ files: toStoredFiles(sourceFiles) });
+      chrome.storage.local.get.mockResolvedValue({ prefs: { openMode: 'merge' } });
+
+      const app = await createApp();
+
+      expect(app.files.map((item) => item.selectedMergeSheetIndex)).toEqual([1, 0]);
+      expect(app.files.map((item) => app.getSelectedMergeSheet(item).name)).toEqual([
+        'Alpha one',
+        'Beta zero',
+      ]);
+      expect(Array.from(document.querySelectorAll('.merge-sheet-select')).map((select) => select.value))
+        .toEqual(['1', '0']);
+    });
+
+    test('clamps an out-of-range restored selection to the last worksheet', async () => {
+      const sourceFiles = makeRegressionFiles({ selectedA: 99, selectedB: 0 });
+      chrome.storage.session.get.mockResolvedValue({ files: toStoredFiles(sourceFiles) });
+
+      const app = await createApp();
+
+      expect(app.files[0].selectedMergeSheetIndex).toBe(1);
+      expect(app.getSelectedMergeSheet(app.files[0]).name).toBe('Alpha one');
+    });
+
+    test('an empty selected worksheet produces an empty merge result', async () => {
+      const app = await createApp();
+      const emptySheet = makeRegressionSheet('Alpha empty', [], 'alpha-empty');
+      app.files = [
+        {
+          name: 'empty.xlsx',
+          ext: 'xlsx',
+          parsed: {
+            sheets: [
+              makeRegressionSheet('Alpha data', [['A'], ['not-selected']], 'alpha-data'),
+              emptySheet,
+            ],
+          },
+          selectedMergeSheetIndex: 1,
+        },
+        {
+          name: 'other.xlsx',
+          ext: 'xlsx',
+          parsed: { sheets: [makeRegressionSheet('Other', [['B'], ['b1']], 'other')] },
+          selectedMergeSheetIndex: 0,
+        },
+      ];
+      enterMergeMode(app);
+
+      const merged = await app.getMergedProcessedData();
+
+      expect(app.getSelectedMergeSheet(app.files[0]).data).toEqual([]);
+      expect(merged.sheets[0].data).toEqual([]);
+    });
+
+    test('keeps formula metadata paired with empty cached display values on the selected worksheet', async () => {
+      const app = await createApp();
+      const formulaData = [['Formula result'], ['']];
+      const formulaMeta = [
+        [{ type: 'string', value: 'Formula result' }],
+        [{ type: 'formula', value: '=SUM(A2:A3)', displayValue: '' }],
+      ];
+      const formulaSheet = {
+        ...makeRegressionSheet('Formula sheet', formulaData, 'formula-second'),
+        cellMeta: formulaMeta,
+      };
+      app.files = [
+        {
+          name: 'formula.xlsx',
+          ext: 'xlsx',
+          parsed: {
+            sheets: [
+              makeRegressionSheet('Not selected', [['Wrong'], ['wrong']], 'formula-first'),
+              formulaSheet,
+            ],
+          },
+          selectedMergeSheetIndex: 1,
+        },
+        {
+          name: 'other.xlsx',
+          ext: 'xlsx',
+          parsed: { sheets: [makeRegressionSheet('Other', [['Other'], ['value']], 'other')] },
+          selectedMergeSheetIndex: 0,
+        },
+      ];
+      Merger.merge.mockImplementationOnce((files) => ({
+        sheets: [{
+          name: 'Merged',
+          data: files[0].sheets[0].data,
+          cellMeta: files[0].sheets[0].cellMeta,
+        }],
+        sourceMap: [],
+      }));
+
+      const merged = await app.getMergedProcessedData();
+      const [rawFiles] = Merger.merge.mock.calls.at(-1);
+      const selectedMeta = rawFiles[0].sheets[0].cellMeta[1][0];
+
+      expect(rawFiles[0].sheets[0].data[1][0]).toBe('');
+      expect(selectedMeta).toEqual({ type: 'formula', value: '=SUM(A2:A3)', displayValue: '' });
+      expect(merged.sheets[0].data[1][0]).toBe('');
+      expect(merged.sheets[0].cellMeta[1][0]).toEqual(selectedMeta);
+    });
+
+    test('preserves formatting from the selected non-first worksheet by source row and column', async () => {
+      const app = await createApp();
+      app.files = makeRegressionFiles({ selectedA: 1, selectedB: 1 });
+      enterMergeMode(app);
+      jest.spyOn(app, 'shouldUseNativeDriveImport').mockReturnValue(false);
+
+      Merger.merge.mockImplementationOnce((files) => ({
+        sheets: [{
+          name: 'Merged',
+          data: [
+            ['Alpha one id', 'Alpha one value'],
+            ['a1', 'alpha-one'],
+            ['Beta one id', 'Beta one value'],
+            ['b1', 'beta-one'],
+          ],
+          cellMeta: null,
+        }],
+        sourceMap: [
+          { fileIndex: 0, sourceRow: 0, colMap: [0, 1] },
+          { fileIndex: 0, sourceRow: 1, colMap: [0, 1] },
+          { fileIndex: 1, sourceRow: 0, colMap: [0, 1] },
+          { fileIndex: 1, sourceRow: 1, colMap: [0, 1] },
+        ],
+      }));
+
+      await app.handleUpload();
+
+      const styleMarkers = GoogleAPI.sheetJsToSheetsFormat.mock.calls
+        .map(([style]) => style?.marker)
+        .filter(Boolean);
+      expect(styleMarkers).toEqual(expect.arrayContaining([
+        'alpha-second-0-0',
+        'alpha-second-0-1',
+        'alpha-second-1-0',
+        'alpha-second-1-1',
+        'beta-second-0-0',
+        'beta-second-0-1',
+        'beta-second-1-0',
+        'beta-second-1-1',
+      ]));
+      expect(styleMarkers).not.toEqual(expect.arrayContaining([
+        'alpha-first-0-0',
+        'alpha-first-1-0',
+        'beta-first-0-0',
+        'beta-first-1-0',
+      ]));
+    });
+
+    test('does not add selectors or change merge behavior for CSV, TSV, or single-sheet workbooks', async () => {
+      const app = await createApp();
+      app.files = [
+        {
+          name: 'data.csv',
+          ext: 'csv',
+          parsed: { sheets: [makeRegressionSheet('CSV', [['A'], ['csv']], 'csv')] },
+          selectedMergeSheetIndex: 0,
+        },
+        {
+          name: 'data.tsv',
+          ext: 'tsv',
+          parsed: { sheets: [makeRegressionSheet('TSV', [['B'], ['tsv']], 'tsv')] },
+          selectedMergeSheetIndex: 0,
+        },
+        {
+          name: 'single.xlsx',
+          ext: 'xlsx',
+          parsed: { sheets: [makeRegressionSheet('Only sheet', [['C'], ['single']], 'single')] },
+          selectedMergeSheetIndex: 0,
+        },
+      ];
+      enterMergeMode(app);
+
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(0);
+      const before = app.getSelectedMergeInput(app.files[0]);
+      app.handleMergeSheetSelection(0, '1');
+
+      expect(app.files.every((item) => item.selectedMergeSheetIndex === 0)).toBe(true);
+      expect(app.getSelectedMergeInput(app.files[0]).sheets[0].data).toEqual(before.sheets[0].data);
+    });
+
+    test('separate mode still uploads every worksheet in an XLSX workbook', async () => {
+      const app = await createApp();
+      app.files = makeRegressionFiles({ selectedA: 1, selectedB: 1 }).slice(0, 1);
+      app.renderFileList();
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(0);
+      jest.spyOn(app, 'shouldUseNativeDriveImport').mockReturnValue(false);
+
+      await app.handleUpload();
+
+      const sheets = GoogleAPI.createSpreadsheet.mock.calls[0][1];
+      expect(sheets.map((sheet) => sheet.name)).toEqual(['Alpha zero', 'Alpha one']);
+      expect(sheets.map((sheet) => sheet.data[1][0])).toEqual(['a0', 'a1']);
     });
   });
 
@@ -3444,6 +4023,161 @@ describe('DragToSheetsApp', () => {
       expect(Array.from(openBtns).every((btn) => btn.disabled)).toBe(true);
     });
 
+    test('renders worksheet selectors only for multi-sheet Excel files in merge mode', async () => {
+      const app = await createApp();
+      app.files = [
+        {
+          name: 'quarterly-report.xlsx',
+          ext: 'xlsx',
+          parsed: {
+            sheets: [
+              { name: 'Q1', data: [['A', 'B'], ['1', '2'], ['3', '4']] },
+              { name: 'Summary', data: [['Total'], ['6']] },
+            ],
+          },
+        },
+        {
+          name: 'single.xlsx',
+          ext: 'xlsx',
+          parsed: { sheets: [{ name: 'Data', data: [['A']] }] },
+        },
+        {
+          name: 'data.csv',
+          ext: 'csv',
+          parsed: {
+            sheets: [
+              { name: 'Data', data: [['A']] },
+              { name: 'Unexpected second sheet', data: [['B']] },
+            ],
+          },
+        },
+        {
+          name: 'data.tsv',
+          ext: 'tsv',
+          parsed: {
+            sheets: [
+              { name: 'Data', data: [['A']] },
+              { name: 'Unexpected second sheet', data: [['B']] },
+            ],
+          },
+        },
+      ];
+
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.updateOpenModeState();
+
+      const selector = document.querySelector('.merge-sheet-select');
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(1);
+      expect(selector.getAttribute('aria-label')).toBe('Worksheet for quarterly-report.xlsx');
+      expect(Array.from(selector.options).map((option) => option.textContent)).toEqual([
+        expect.stringContaining('Q1'),
+        expect.stringContaining('Summary'),
+      ]);
+      expect(selector.options[0].textContent).toEqual(expect.stringContaining('3 rows'));
+      expect(selector.options[0].textContent).toEqual(expect.stringContaining('2 cols'));
+
+      document.querySelector('input[name="open-mode"][value="separate"]').checked = true;
+      app.updateOpenModeState();
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(0);
+    });
+
+    test('disables worksheet selectors while an upload is in progress', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'workbook.xlsx',
+        ext: 'xlsx',
+        parsed: {
+          sheets: [
+            { name: 'Data', data: [['A']] },
+            { name: 'Summary', data: [['B']] },
+          ],
+        },
+      }];
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.uploading = true;
+
+      app.updateOpenModeState();
+
+      expect(document.querySelector('.merge-sheet-select').disabled).toBe(true);
+    });
+
+    test('worksheet selection resets merge state, refreshes, and persists the selected index', async () => {
+      const app = await createApp();
+      app.files = [{
+        name: 'workbook.xlsx',
+        ext: 'xlsx',
+        selectedMergeSheetIndex: 0,
+        parsed: {
+          sheets: [
+            { name: 'Data', data: [['A']] },
+            { name: 'Summary', data: [['B']] },
+          ],
+        },
+      }];
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.smartMappingApproved = true;
+      app.smartMappingDeclined = true;
+
+      const customMappingSpy = jest.spyOn(app, 'updateCustomMappingVisibility').mockResolvedValue();
+      const previewSpy = jest.spyOn(app, 'schedulePreviewRefresh').mockImplementation(() => {});
+      const summarySpy = jest.spyOn(app, '_updateSummaryCards').mockImplementation(() => {});
+      const saveSpy = jest.spyOn(app, 'saveFilesSession').mockImplementation(() => {});
+      const changedSpy = jest.spyOn(app, 'markFilesChanged');
+
+      app.updateOpenModeState();
+      const selector = document.querySelector('.merge-sheet-select');
+      selector.value = '1';
+      selector.dispatchEvent(new Event('change', { bubbles: true }));
+
+      expect(app.files[0].selectedMergeSheetIndex).toBe(1);
+      expect(changedSpy).toHaveBeenCalled();
+      expect(app.smartMappingApproved).toBe(false);
+      expect(app.smartMappingDeclined).toBe(false);
+      expect(customMappingSpy).toHaveBeenCalled();
+      expect(previewSpy).toHaveBeenCalled();
+      expect(summarySpy).toHaveBeenCalled();
+      expect(saveSpy).toHaveBeenCalled();
+    });
+
+    test('hydrates lazy workbook metadata with a visible loading status', async () => {
+      const app = await createApp();
+      let resolveMetadata;
+      const metadataPromise = new Promise((resolve) => {
+        resolveMetadata = resolve;
+      });
+      Parser.getWorkbookMetadata.mockReturnValue(metadataPromise);
+      app.updateCustomMappingVisibility = jest.fn().mockResolvedValue();
+      app.files = [{
+        name: 'lazy-workbook.xlsx',
+        ext: 'xlsx',
+        file: new File(['workbook'], 'lazy-workbook.xlsx'),
+        lazy: true,
+        parsed: null,
+      }];
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+
+      app.updateOpenModeState();
+      expect(app.loadingText.textContent).toContain('Loading worksheet');
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(0);
+
+      resolveMetadata({
+        sheets: [
+          { name: 'Data', rowCount: 10, colCount: 2 },
+          { name: 'Summary', rowCount: 3, colCount: 1 },
+        ],
+      });
+      await app.mergeSheetMetadataPromise;
+
+      expect(document.querySelectorAll('.merge-sheet-select')).toHaveLength(1);
+      expect(Array.from(document.querySelector('.merge-sheet-select').options).map((option) => option.textContent)).toEqual([
+        expect.stringContaining('Data'),
+        expect.stringContaining('Summary'),
+      ]);
+      expect(document.querySelector('.merge-sheet-select').options[0].textContent).toEqual(
+        expect.stringContaining('10 rows')
+      );
+    });
+
     test('per-file open button triggers uploadSingleFromList with the correct index', async () => {
       const app = await createApp();
       app.files = [
@@ -3935,6 +4669,160 @@ describe('DragToSheetsApp', () => {
       const callArgs = GoogleAPI.createSpreadsheet.mock.calls[0];
       const sheetsArg = callArgs[1];
       expect(sheetsArg[0].cellMeta).toEqual(formulaMeta);
+    });
+  });
+
+  describe('selected worksheet merge uploads', () => {
+    test('uploads selected worksheet data, metadata, formulas, styles, cleanup, and dimensions', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      document.getElementById('opt-trim').checked = true;
+
+      const masterSelectedStyles = [
+        [{ font: { bold: true }, fgColor: { rgb: '111111' } }, { font: { italic: true } }],
+        [{ fgColor: { rgb: '222222' } }, { font: { bold: true } }],
+      ];
+      const sourceSelectedStyles = [
+        [{ font: { bold: true }, fgColor: { rgb: '333333' } }, { font: { italic: true } }],
+        [{ fgColor: { rgb: '444444' } }, { font: { bold: true } }],
+      ];
+      const masterSelectedMeta = [
+        [
+          { type: 'string', value: 'Selected master' },
+          { type: 'string', value: 'Formula result' },
+        ],
+        [
+          { type: 'number', value: 100 },
+          { type: 'formula', value: '=SUM(A2:A2)' },
+        ],
+      ];
+      const sourceSelectedMeta = [
+        [
+          { type: 'string', value: 'Selected source' },
+          { type: 'string', value: 'Source formula' },
+        ],
+        [
+          { type: 'number', value: 200 },
+          { type: 'formula', value: '=SUM(A2:A2)' },
+        ],
+      ];
+      const masterFirstSheet = {
+        name: 'Wrong master sheet',
+        data: [['WRONG MASTER'], ['wrong']],
+        cellMeta: [[{ type: 'string', value: 'WRONG MASTER' }], [{ type: 'string', value: 'wrong' }]],
+        styles: [[{ fgColor: { rgb: 'AAAAAA' } }], [{ fgColor: { rgb: 'BBBBBB' } }]],
+      };
+      const sourceFirstSheet = {
+        name: 'Wrong source sheet',
+        data: [['WRONG SOURCE'], ['wrong']],
+        cellMeta: [[{ type: 'string', value: 'WRONG SOURCE' }], [{ type: 'string', value: 'wrong' }]],
+        styles: [[{ fgColor: { rgb: 'CCCCCC' } }], [{ fgColor: { rgb: 'DDDDDD' } }]],
+      };
+
+      app.files = [
+        {
+          file: new File([new ArrayBuffer(10)], 'master.xlsx'),
+          name: 'master.xlsx',
+          ext: 'xlsx',
+          selectedMergeSheetIndex: 1,
+          parsed: {
+            sheets: [
+              masterFirstSheet,
+              {
+                name: 'Selected master sheet',
+                data: [['Selected master', 'Formula result'], [100, '=SUM(A2:A2)']],
+                cellMeta: masterSelectedMeta,
+                styles: masterSelectedStyles,
+              },
+            ],
+            themeColors: ['MASTER SELECTED THEME'],
+          },
+        },
+        {
+          file: new File([new ArrayBuffer(10)], 'source.xlsx'),
+          name: 'source.xlsx',
+          ext: 'xlsx',
+          selectedMergeSheetIndex: 1,
+          parsed: {
+            sheets: [
+              sourceFirstSheet,
+              {
+                name: 'Selected source sheet',
+                data: [['Selected source', 'Source formula'], [200, '=SUM(A2:A2)']],
+                cellMeta: sourceSelectedMeta,
+                styles: sourceSelectedStyles,
+              },
+            ],
+            themeColors: ['SOURCE SELECTED THEME'],
+          },
+        },
+      ];
+
+      const selectedInputs = [];
+      Merger.merge.mockImplementation((files) => {
+        selectedInputs.push(...files);
+        return {
+          sheets: [{
+            name: 'Merged',
+            data: [
+              ['Selected master', 'Formula result'],
+              [100, '=SUM(A2:A2)'],
+              [200, '=SUM(A2:A2)'],
+            ],
+            cellMeta: [
+              masterSelectedMeta[0],
+              masterSelectedMeta[1],
+              sourceSelectedMeta[1],
+            ],
+          }],
+          sourceMap: [
+            { fileIndex: 0, sourceRow: 0, colMap: [0, 1] },
+            { fileIndex: 0, sourceRow: 1, colMap: [0, 1] },
+            { fileIndex: 1, sourceRow: 1, colMap: [0, 1] },
+          ],
+        };
+      });
+      GoogleAPI.sheetJsToSheetsFormat.mockImplementation((style) => style);
+      GoogleAPI.createSpreadsheet.mockClear();
+      GoogleAPI.applyFormatting.mockClear();
+      GoogleAPI.cleanUploadedSheet.mockClear();
+
+      await app.handleUpload();
+
+      expect(selectedInputs.map((input) => input.sheets[0].name)).toEqual([
+        'Selected master sheet',
+        'Selected source sheet',
+      ]);
+      expect(selectedInputs.map((input) => input.sheets[0].data[0])).toEqual([
+        ['Selected master', 'Formula result'],
+        ['Selected source', 'Source formula'],
+      ]);
+      expect(selectedInputs[0].sheets[0].cellMeta).toEqual(masterSelectedMeta);
+      expect(selectedInputs[1].sheets[0].cellMeta).toEqual(sourceSelectedMeta);
+
+      const spreadsheetData = GoogleAPI.createSpreadsheet.mock.calls[0][1][0];
+      expect(spreadsheetData.data).toEqual([
+        ['Selected master', 'Formula result'],
+        [100, '=SUM(A2:A2)'],
+        [200, '=SUM(A2:A2)'],
+      ]);
+      expect(spreadsheetData.data).not.toContainEqual(['WRONG MASTER']);
+      expect(spreadsheetData.data).not.toContainEqual(['WRONG SOURCE']);
+      expect(spreadsheetData.cellMeta[1][1]).toEqual(masterSelectedMeta[1][1]);
+      expect(spreadsheetData.cellMeta[2][1]).toEqual(sourceSelectedMeta[1][1]);
+      expect(spreadsheetData.data).toHaveLength(3);
+      expect(spreadsheetData.data[0]).toHaveLength(2);
+
+      const styleCalls = GoogleAPI.sheetJsToSheetsFormat.mock.calls;
+      expect(styleCalls).toEqual(expect.arrayContaining([
+        [masterSelectedStyles[0][0], ['MASTER SELECTED THEME']],
+        [masterSelectedStyles[1][0], ['MASTER SELECTED THEME']],
+        [sourceSelectedStyles[1][0], ['SOURCE SELECTED THEME']],
+      ]));
+      expect(styleCalls.flat().some((value) => value === masterFirstSheet.styles[0][0])).toBe(false);
+      expect(styleCalls.flat().some((value) => value === sourceFirstSheet.styles[0][0])).toBe(false);
+      expect(GoogleAPI.applyFormatting).toHaveBeenCalled();
+      expect(GoogleAPI.cleanUploadedSheet).toHaveBeenCalled();
     });
   });
 
