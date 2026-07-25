@@ -1,57 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const AdmZip = require('adm-zip');
 const { getManifestReferencedFiles, validateFilesExist } = require('./validate-manifest');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST_DIR = path.join(ROOT, 'dist');
 const STAGING = path.join(ROOT, 'tmp-package');
 
-function main() {
-  console.log('--- Packaging Chrome Extension ---\n');
+const ZIP_DATE = new Date('1980-01-01T00:00:00Z');
 
-  step('1/5', 'Running setup', () => {
-    const r = spawnSync(process.execPath, [path.join(ROOT, 'setup.js')], {
-      cwd: ROOT, stdio: 'inherit',
-    });
-    if (r.status !== 0) die('Setup failed.');
-  });
-
-  step('2/5', 'Validating manifest file references', () => {
-    const refs = getManifestReferencedFiles(ROOT);
-    const missing = validateFilesExist(ROOT, refs);
-    if (missing.length) {
-      console.error('Missing files referenced in manifest.json:');
-      missing.forEach(f => console.error('  ' + f));
-      die('Manifest validation failed.');
-    }
-    console.log('  All ' + refs.length + ' manifest references OK.');
-  });
-
-  step('3/5', 'Collecting production files', () => {
-    const files = collectProductionFiles(ROOT);
-    console.log('  ' + files.length + ' files to package.');
-  });
-
-  step('4/5', 'Staging files', () => {
-    stageFiles(STAGING, collectProductionFiles(ROOT));
-  });
-
-  step('5/5', 'Creating ZIP', () => {
-    createZip(STAGING, DIST_DIR);
-  });
-
-  console.log('\nDone.');
-}
-
-function step(label, description, fn) {
-  process.stdout.write('[' + label + '] ' + description + '... ');
-  fn();
-}
-
-function die(msg) {
-  console.error(msg);
-  process.exit(1);
+function toArchivePath(filePath) {
+  return filePath.split(path.sep).join('/');
 }
 
 function collectProductionFiles(rootDir) {
@@ -83,20 +43,27 @@ function collectProductionFiles(rootDir) {
   return [...files].sort();
 }
 
-function stageFiles(stagingDir, files) {
+function stageFiles(stagingDir, files, rootDir) {
   if (fs.existsSync(stagingDir)) {
-    fs.rmSync(stagingDir, { recursive: true });
+    fs.rmSync(stagingDir, { recursive: true, force: true });
   }
   for (const file of files) {
-    const src = path.join(ROOT, file);
+    const src = path.join(rootDir, file);
     const dest = path.join(stagingDir, file);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
   }
 }
 
-function createZip(stagingDir, distDir) {
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+function listStagedFiles(stagingDir) {
+  return fs.readdirSync(stagingDir, { recursive: true })
+    .map(entry => toArchivePath(entry))
+    .filter(entry => fs.statSync(path.join(stagingDir, entry)).isFile())
+    .sort();
+}
+
+async function createZip(stagingDir, distDir, rootDir, files = listStagedFiles(stagingDir)) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'manifest.json'), 'utf8'));
   const version = manifest.version;
   const zipName = 'drag-to-sheets-' + version + '.zip';
 
@@ -111,22 +78,73 @@ function createZip(stagingDir, distDir) {
   }
 
   const zipPath = path.join(distDir, zipName);
+  const zip = new AdmZip();
 
-  const r = spawnSync('powershell', [
-    '-NoProfile',
-    '-Command',
-    "Compress-Archive -Path '" + stagingDir + "\\*' -DestinationPath '" + zipPath + "' -Force",
-  ], { cwd: ROOT, stdio: 'pipe' });
-  if (r.status !== 0) {
-    console.error(r.stderr ? r.stderr.toString() : '');
-    die('Failed to create ZIP.');
+  for (const entry of [...files].map(toArchivePath).sort()) {
+    const fullPath = path.join(stagingDir, entry);
+    if (fs.statSync(fullPath).isFile()) {
+      zip.addFile(entry, fs.readFileSync(fullPath));
+      zip.getEntry(entry).header.time = ZIP_DATE;
+    }
   }
 
-  fs.rmSync(stagingDir, { recursive: true });
-
-  const stats = fs.statSync(zipPath);
-  console.log('  Created ' + zipName + ' (' + (stats.size / 1024).toFixed(1) + ' KB)');
-  console.log('  Location: ' + zipPath);
+  zip.writeZip(zipPath);
+  return zipPath;
 }
 
-main();
+async function main() {
+  console.log('--- Packaging Chrome Extension ---\n');
+  try {
+    process.stdout.write('[1/5] Running setup... ');
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'setup.js')], {
+      cwd: ROOT, stdio: 'inherit',
+    });
+    if (r.status !== 0) throw Error('Setup failed.');
+
+    process.stdout.write('[2/5] Validating manifest file references... ');
+    const refs = getManifestReferencedFiles(ROOT);
+    const missing = validateFilesExist(ROOT, refs);
+    if (missing.length) {
+      console.error('');
+      missing.forEach(f => console.error('  missing: ' + f));
+      throw Error('Manifest validation failed.');
+    }
+    console.log('All ' + refs.length + ' manifest references OK.');
+
+    process.stdout.write('[3/5] Collecting production files... ');
+    const files = collectProductionFiles(ROOT);
+    console.log(files.length + ' files to package.');
+
+    process.stdout.write('[4/5] Staging files... ');
+    stageFiles(STAGING, files, ROOT);
+    console.log('done.');
+
+    process.stdout.write('[5/5] Creating ZIP... ');
+    const zipPath = await createZip(STAGING, DIST_DIR, ROOT, files);
+    const stats = fs.statSync(zipPath);
+    console.log('Created ' + path.basename(zipPath) + ' (' + (stats.size / 1024).toFixed(1) + ' KB)');
+    console.log('  Location: ' + zipPath);
+
+    console.log('\nDone.');
+  } finally {
+    if (fs.existsSync(STAGING)) {
+      fs.rmSync(STAGING, { recursive: true, force: true });
+    }
+  }
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  collectProductionFiles,
+  createZip,
+  listStagedFiles,
+  stageFiles,
+  toArchivePath,
+  ZIP_DATE,
+};
