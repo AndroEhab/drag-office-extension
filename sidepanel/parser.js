@@ -32,6 +32,14 @@ const Parser = (() => {
   }
 
   /**
+   * Remove one UTF-8 BOM character from the beginning of delimited text.
+   * BOM characters elsewhere in the file are valid field content.
+   */
+  function stripLeadingBom(text) {
+    return text.startsWith('\uFEFF') ? text.slice(1) : text;
+  }
+
+  /**
    * RFC 4180 compliant CSV/TSV parser.
    * Handles quoted fields, escaped quotes, mixed line endings.
    */
@@ -107,22 +115,112 @@ const Parser = (() => {
   }
 
   /**
-   * Auto-detect CSV delimiter from first few lines.
-   *
-   * Priority: tabs > semicolons > commas (default).
-   * Uses a 4096-byte sample for efficiency — large enough for reliable
-   * detection without scanning the entire file. Adjust the sample size
-   * if detection accuracy is insufficient for edge-case files.
+   * Analyze several complete records and ignore candidate delimiters inside
+   * quoted fields. The candidate order provides a deterministic tie-breaker.
+   */
+  const DELIMITER_CANDIDATES = [',', ';', '\t'];
+  const DELIMITER_SAMPLE_CHARS = 4096;
+  const DELIMITER_SAMPLE_RECORDS = 20;
+
+  /**
+   * Count fields in complete, non-empty records for one delimiter.
+   * Newlines inside quoted fields are part of the current record.
+   */
+  function getFieldCounts(text, delimiter) {
+    const sample = text.substring(0, DELIMITER_SAMPLE_CHARS);
+    const sampleIsComplete = sample.length === text.length;
+    const fieldCounts = [];
+    let fieldCount = 1;
+    let fieldEmpty = true;
+    let recordHasContent = false;
+    let inQuotes = false;
+
+    const addRecord = () => {
+      if (!recordHasContent || inQuotes) return;
+      fieldCounts.push(fieldCount);
+      fieldCount = 1;
+      fieldEmpty = true;
+      recordHasContent = false;
+    };
+
+    for (let i = 0; i < sample.length && fieldCounts.length < DELIMITER_SAMPLE_RECORDS; i++) {
+      const ch = sample[i];
+
+      if (inQuotes) {
+        recordHasContent = true;
+        if (ch === '"') {
+          if (i + 1 < sample.length && sample[i + 1] === '"') {
+            // Escaped quote
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        }
+        continue;
+      }
+
+      if (ch === '"' && fieldEmpty) {
+        inQuotes = true;
+        fieldEmpty = false;
+        recordHasContent = true;
+      } else if (DELIMITER_CANDIDATES.includes(ch)) {
+        if (ch === delimiter) fieldCount++;
+        fieldEmpty = true;
+        recordHasContent = true;
+      } else if (ch === '\r' || ch === '\n') {
+        addRecord();
+        // Treat CRLF as one record separator.
+        if (ch === '\r' && i + 1 < sample.length && sample[i + 1] === '\n') i++;
+      } else {
+        fieldEmpty = false;
+        recordHasContent = true;
+      }
+    }
+
+    // Do not score a final partial record when the sample was truncated.
+    if (sampleIsComplete && fieldCounts.length < DELIMITER_SAMPLE_RECORDS) addRecord();
+
+    return fieldCounts;
+  }
+
+  /**
+   * Auto-detect CSV delimiter from several complete records near the start.
+   * Delimiters inside quoted fields are ignored by getFieldCounts().
    */
   function detectDelimiter(text) {
-    const sample = text.substring(0, 4096);
-    const commas = (sample.match(/,/g) || []).length;
-    const tabs = (sample.match(/\t/g) || []).length;
-    const semicolons = (sample.match(/;/g) || []).length;
+    let best = null;
 
-    if (tabs > commas && tabs > semicolons) return '\t';
-    if (semicolons > commas) return ';';
-    return ',';
+    for (const delimiter of DELIMITER_CANDIDATES) {
+      const fieldCounts = getFieldCounts(text, delimiter);
+      if (fieldCounts.length === 0) continue;
+
+      const frequencies = new Map();
+      for (const count of fieldCounts) {
+        frequencies.set(count, (frequencies.get(count) || 0) + 1);
+      }
+
+      let dominantFieldCount = 0;
+      let consistentRecords = 0;
+      for (const [count, frequency] of frequencies) {
+        if (frequency > consistentRecords) {
+          dominantFieldCount = count;
+          consistentRecords = frequency;
+        }
+      }
+
+      // A delimiter that only produces one field is not useful when another
+      // candidate can produce multiple fields.
+      if (dominantFieldCount <= 1) continue;
+
+      const consistencyScore = consistentRecords / fieldCounts.length;
+      if (!best || consistencyScore > best.consistencyScore) {
+        best = { delimiter, consistencyScore };
+      }
+    }
+
+    // Candidate order is the deterministic tie-breaker. Comma is also the
+    // safe fallback for empty, single-column, or otherwise unhelpful input.
+    return best ? best.delimiter : ',';
   }
 
   function normalizeTable(data) {
@@ -178,9 +276,10 @@ const Parser = (() => {
   async function previewDelimited(file, delimiter, sheetName, options = {}) {
     const sampleRows = options.sampleRows || DEFAULT_PREVIEW_ROWS;
     const maxBytes = options.maxBytes || DEFAULT_PREVIEW_BYTES;
-    const text = typeof file._content === 'string'
+    const rawText = typeof file._content === 'string'
       ? file._content.slice(0, maxBytes)
       : await readFile(typeof file.slice === 'function' ? file.slice(0, maxBytes) : file, true);
+    const text = stripLeadingBom(rawText);
     const parsedRows = parseCsv(text, delimiter);
     const truncated = (file.size || 0) > maxBytes;
 
@@ -731,7 +830,7 @@ const Parser = (() => {
         }
 
         // JavaScript fallback
-        const text = new TextDecoder('utf-8').decode(buffer);
+        const text = stripLeadingBom(new TextDecoder('utf-8').decode(buffer));
         const finalDelimiter = ext === 'tsv' ? '\t' : detectDelimiter(text);
         const data = parseCsv(text, finalDelimiter);
 
@@ -807,7 +906,7 @@ const Parser = (() => {
               : file,
             true
           );
-        const delimiter = ext === 'tsv' ? '\t' : detectDelimiter(text);
+        const delimiter = ext === 'tsv' ? '\t' : detectDelimiter(stripLeadingBom(text));
         return previewDelimited(file, delimiter, baseName, options);
       }
 
