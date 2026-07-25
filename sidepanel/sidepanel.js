@@ -20,6 +20,7 @@
     tabYieldEvery: 5,
     tabYieldMs: 75,
   };
+  const MAX_IMPORT_SIZE_BYTES = 50 * 1024 * 1024;
   const PREVIEW_SAMPLE_ROWS = 51;
   const EXCEL_METADATA_PREVIEW_NOTICE =
     'Excel metadata-sensitive transformations (Trim, Fix numbers, and Normalize headers) are not represented in this sample because trustworthy cell metadata is unavailable; they will be applied on upload.';
@@ -1274,6 +1275,42 @@
           throw new Error(`Server returned ${response.status} ${response.statusText}`);
         }
 
+        const contentLength = response.headers.get('content-length');
+        if (contentLength !== null) {
+          const declaredSize = parseInt(contentLength, 10);
+          if (!isNaN(declaredSize) && declaredSize > MAX_IMPORT_SIZE_BYTES) {
+            throw new Error(
+              `File too large (${this.formatBytes(declaredSize)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
+            );
+          }
+        }
+
+        const chunks = [];
+        let totalBytes = 0;
+        let sizeExceeded = false;
+        const reader = response.body.getReader();
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            totalBytes += value.byteLength;
+            if (totalBytes > MAX_IMPORT_SIZE_BYTES) {
+              sizeExceeded = true;
+              break;
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.cancel().catch(() => {});
+        }
+
+        if (sizeExceeded) {
+          throw new Error(
+            `File too large (${this.formatBytes(totalBytes)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
+          );
+        }
+
         const disposition = response.headers.get('content-disposition') || '';
         const contentType = response.headers.get('content-type') || '';
         const fileName = this.resolveFileName(raw, disposition, contentType);
@@ -1288,7 +1325,7 @@
           throw new Error('Excel support not installed. See README for setup.');
         }
 
-        const blob = await response.blob();
+        const blob = new Blob(chunks, { type: contentType || undefined });
         const file = new File([blob], fileName, { type: blob.type });
 
         await this.handleFiles([file]);

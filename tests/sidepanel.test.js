@@ -3425,6 +3425,186 @@ describe('DragToSheetsApp', () => {
     });
   });
 
+  // ---- URL import download size limit ----
+
+  describe('importFromUrl download size limit', () => {
+    beforeEach(() => {
+      chrome.permissions.contains.mockResolvedValue(true);
+    });
+
+    function makeMockResponse(opts = {}) {
+      const chunks = opts.chunks || [];
+      let chunkIndex = 0;
+      const reader = {
+        read: jest.fn().mockImplementation(() => {
+          if (chunkIndex < chunks.length) {
+            return Promise.resolve({ done: false, value: chunks[chunkIndex++] });
+          }
+          return Promise.resolve({ done: true, value: undefined });
+        }),
+        cancel: jest.fn().mockResolvedValue(undefined),
+      };
+
+      return {
+        ok: opts.ok !== false,
+        headers: {
+          get: jest.fn((name) => {
+            const lower = name.toLowerCase();
+            if (lower === 'content-length') {
+              return opts.contentLength !== undefined ? String(opts.contentLength) : null;
+            }
+            if (lower === 'content-type') return opts.contentType || 'text/csv';
+            if (lower === 'content-disposition') return opts.contentDisposition || '';
+            return null;
+          }),
+        },
+        body: { getReader: () => reader },
+      };
+    }
+
+    test('small response with Content-Length succeeds', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+      const data = 'a,b\n1,2';
+      const encoded = new TextEncoder().encode(data);
+      global.fetch = jest.fn().mockResolvedValue(
+        makeMockResponse({ chunks: [encoded], contentLength: encoded.byteLength })
+      );
+      Parser.parse.mockResolvedValue({ sheets: [{ name: 'test', data: [['a','b'],['1','2']] }] });
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].name).toBe('data.csv');
+      expect(app.urlFetchBtn.disabled).toBe(false);
+
+      delete global.fetch;
+    });
+
+    test('oversized Content-Length rejects immediately', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+      global.fetch = jest.fn().mockResolvedValue(
+        makeMockResponse({ chunks: [], contentLength: 60 * 1024 * 1024 })
+      );
+
+      await app.importFromUrl();
+
+      expect(app.loadingText.textContent).toContain('File too large');
+      expect(app.loadingText.textContent).toContain('50 MB');
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.urlFetchBtn.disabled).toBe(false);
+
+      delete global.fetch;
+    });
+
+    test('missing Content-Length succeeds for small stream', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+      const data = 'a,b\n1,2';
+      const encoded = new TextEncoder().encode(data);
+      global.fetch = jest.fn().mockResolvedValue(
+        makeMockResponse({ chunks: [encoded], contentLength: null })
+      );
+      Parser.parse.mockResolvedValue({ sheets: [{ name: 'test', data: [['a','b'],['1','2']] }] });
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.urlFetchBtn.disabled).toBe(false);
+
+      delete global.fetch;
+    });
+
+    test('stream exceeding limit is aborted', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+      global.fetch = jest.fn().mockResolvedValue(
+        makeMockResponse({
+          chunks: [{ byteLength: 60 * 1024 * 1024 }],
+          contentLength: null,
+        })
+      );
+
+      await app.importFromUrl();
+
+      expect(app.loadingText.textContent).toContain('File too large');
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.urlFetchBtn.disabled).toBe(false);
+
+      delete global.fetch;
+    });
+
+    test('stream ending below limit with Content-Length succeeds', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+      const data = 'x,y\n1,2';
+      const encoded = new TextEncoder().encode(data);
+      global.fetch = jest.fn().mockResolvedValue(
+        makeMockResponse({ chunks: [encoded], contentLength: encoded.byteLength })
+      );
+      Parser.parse.mockResolvedValue({ sheets: [{ name: 'test', data: [['x','y'],['1','2']] }] });
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].name).toBe('data.csv');
+
+      delete global.fetch;
+    });
+
+    test('timeout aborts the download', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+
+      global.fetch = jest.fn().mockImplementation((_url, options) => {
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      });
+
+      const importPromise = app.importFromUrl();
+      await flushPromises();
+
+      app.currentFetchController.abort();
+      await importPromise;
+
+      expect(app.loadingText.textContent).toContain('cancelled or timed out');
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.urlFetchBtn.disabled).toBe(false);
+      expect(app.currentFetchController).toBeNull();
+
+      delete global.fetch;
+    });
+
+    test('manual cancellation aborts the download', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/data.csv';
+
+      global.fetch = jest.fn().mockImplementation((_url, options) => {
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      });
+
+      const importPromise = app.importFromUrl();
+      await flushPromises();
+
+      app.toggleUrlBar(false);
+      await importPromise;
+
+      expect(app.loadingText.textContent).toContain('cancelled or timed out');
+      expect(app.urlFetchBtn.disabled).toBe(false);
+      expect(app.currentFetchController).toBeNull();
+
+      delete global.fetch;
+    });
+  });
+
   // ---- Merged CSV integration ----
 
   describe('merged CSV integration', () => {
