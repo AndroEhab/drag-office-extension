@@ -323,7 +323,12 @@ const Parser = (() => {
       sheetRows: sampleRows,
     });
 
-    const name = workbook.SheetNames[0] || 'Sheet1';
+    const requestedSheetIndex = Number(options.sheetIndex);
+    const hasSheetSelection = Number.isFinite(requestedSheetIndex);
+    const selectedSheetIndex = hasSheetSelection
+      ? Math.max(0, Math.min(Math.trunc(requestedSheetIndex), Math.max(workbook.SheetNames.length - 1, 0)))
+      : 0;
+    const name = workbook.SheetNames[selectedSheetIndex] || 'Sheet1';
     const sheet = workbook.Sheets[name];
     const sampleData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     let sampleColCount = sampleData.reduce((max, row) => Math.max(max, row.length), 0);
@@ -356,7 +361,9 @@ const Parser = (() => {
       normalized.rows.pop();
       cellMeta.pop();
     }
-    // Compute whole-workbook totals across every sheet
+    // Compute whole-workbook totals across every sheet by default. A scoped
+    // worksheet preview reports only the selected worksheet's dimensions so
+    // merge-mode summaries do not include hidden worksheets.
     let totalRows = 0;
     let totalDataRows = 0;
     let maxColsAll = 0;
@@ -374,14 +381,38 @@ const Parser = (() => {
       maxColsAll = Math.max(maxColsAll, sheetCols);
     }
 
+    let selectedRows = null;
+    let selectedCols = null;
+    const selectedFullRef = sheet?.['!fullref'] || sampleRef;
+    if (hasSheetSelection && selectedFullRef && typeof XLSX.utils.decode_range === 'function') {
+      try {
+        const range = XLSX.utils.decode_range(selectedFullRef);
+        selectedRows = range.e.r - range.s.r + 1;
+        selectedCols = range.e.c - range.s.c + 1;
+      } catch (_) {
+        // Keep selected worksheet dimensions unknown when its range is invalid.
+      }
+    }
+
+    const rowCount = hasSheetSelection
+      ? selectedRows
+      : (allExact ? totalRows : null);
+    const dataRowCount = hasSheetSelection
+      ? (selectedRows === null ? null : Math.max(selectedRows - 1, 0))
+      : (allExact ? totalDataRows : null);
+    const colCount = hasSheetSelection
+      ? selectedCols
+      : (allExact ? maxColsAll : null);
+    const previewRowCount = hasSheetSelection ? selectedRows : (allExact ? totalRows : normalized.rows.length);
+
     const result = {
       sheets: [{ name, data: normalized.rows, cellMeta }],
       previewMeta: {
-        rowCount: allExact ? totalRows : null,
-        dataRowCount: allExact ? totalDataRows : null,
-        colCount: allExact ? maxColsAll : null,
+        rowCount,
+        dataRowCount,
+        colCount,
         sheetCount: workbook.SheetNames.length,
-        sampled: (allExact ? totalRows : normalized.rows.length) > normalized.rows.length,
+        sampled: previewRowCount === null || previewRowCount > normalized.rows.length,
         sampleRows: normalized.rows.length,
         fileSize: options.fileSize || 0,
       },
@@ -649,6 +680,58 @@ const Parser = (() => {
   }
 
   /**
+   * Read worksheet names and range-derived dimensions without materializing
+   * normalized cell data, styles, or cell metadata.
+   */
+  async function getWorkbookMetadata(file) {
+    const ext = getExtension(file.name);
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+
+    if (ext === 'csv' || ext === 'tsv') {
+      return {
+        sheets: [{ name: baseName, rowCount: null, colCount: null }],
+      };
+    }
+
+    if (ext !== 'xlsx' && ext !== 'xls') {
+      throw new Error(`Unsupported file type: .${ext}`);
+    }
+    if (typeof XLSX === 'undefined') {
+      throw new Error(
+        'Excel support requires the SheetJS library. ' +
+        'Run "npm run setup" or see README for instructions.'
+      );
+    }
+
+    const buffer = await readFile(file, false);
+    const workbook = XLSX.read(buffer, {
+      type: 'array',
+      cellStyles: false,
+      cellNF: false,
+    });
+    const sheets = workbook.SheetNames.map((name) => {
+      const sheet = workbook.Sheets[name];
+      const ref = sheet?.['!fullref'] || sheet?.['!ref'];
+      if (!ref || typeof XLSX.utils?.decode_range !== 'function') {
+        return { name, rowCount: null, colCount: null };
+      }
+
+      try {
+        const range = XLSX.utils.decode_range(ref);
+        return {
+          name,
+          rowCount: range.e.r - range.s.r + 1,
+          colCount: range.e.c - range.s.c + 1,
+        };
+      } catch (_) {
+        return { name, rowCount: null, colCount: null };
+      }
+    });
+
+    return { sheets };
+  }
+
+  /**
    * Build a cell-metadata matrix parallel to the data matrix.
    * Each entry is a token: { type, value, formula?, formatType? }
    * Derived from SheetJS cell objects (t, v, f, z).
@@ -889,6 +972,8 @@ const Parser = (() => {
       return parseExcel(buffer, options);
     },
 
+    getWorkbookMetadata,
+
     async preview(file, options = {}) {
       const ext = getExtension(file.name);
       const baseName = file.name.replace(/\.[^.]+$/, '');
@@ -912,8 +997,12 @@ const Parser = (() => {
 
       const buffer = await readFile(file, false);
       
-      // Try Rust/WASM for preview if available
-      if (typeof RustEngine !== 'undefined' && RustEngine.ready()) {
+      // Try Rust/WASM for the default/first-sheet preview. For an explicitly
+      // selected later worksheet, use the JS path until the Rust API exposes
+      // a worksheet selector of its own.
+      const requestedSheetIndex = Number(options.sheetIndex);
+      const hasLaterSheetSelection = Number.isFinite(requestedSheetIndex) && Math.trunc(requestedSheetIndex) > 0;
+      if (!hasLaterSheetSelection && typeof RustEngine !== 'undefined' && RustEngine.ready()) {
         try {
           const previewOptions = {
             ...options,

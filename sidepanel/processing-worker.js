@@ -50,6 +50,9 @@ self.onmessage = async (event) => {
       case 'parse':
         result = await Parser.parse(payload.file, payload.options || {});
         break;
+      case 'workbookMetadata':
+        result = await Parser.getWorkbookMetadata(payload.file);
+        break;
       case 'preview':
         result = await Parser.preview(payload.file, payload.options || {});
         break;
