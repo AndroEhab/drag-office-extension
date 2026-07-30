@@ -758,8 +758,48 @@ body {
   flex-shrink: 0;
 }
 
+/* Circular checkboxes — accent-color alone keeps the native square shape
+   in Chromium, so hide native rendering and draw a custom circle + check. */
 .checkbox-label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--color-border-strong);
   border-radius: 50%;
+  background: var(--color-bg);
+  position: relative;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.checkbox-label input[type="checkbox"]:hover {
+  border-color: var(--color-accent);
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.checkbox-label input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.checkbox-label input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .radio-sub {
