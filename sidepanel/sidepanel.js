@@ -1232,6 +1232,7 @@
 
     async init() {
       this.bindElements();
+      this.initTheme();
       this.renderIcons();
       this.setupDragDrop();
       this.setupEvents();
@@ -1253,6 +1254,7 @@
       this.cleanupResultsList = document.getElementById('cleanup-results-list');
       this.cleanupResultsEmpty = document.getElementById('cleanup-results-empty');
       this.uploadBtn = document.getElementById('upload-btn');
+      this.themeToggle = document.getElementById('theme-toggle');
       this.settingsBtn = document.getElementById('settings-btn');
       this.cleaningOptions = document.getElementById('cleaning-options');
       this.previewSelect = document.getElementById('preview-select');
@@ -1386,6 +1388,13 @@
     setupEvents() {
       this.uploadBtn.addEventListener('click', () => this.handleUpload());
       this.clearBtn.addEventListener('click', () => this.clearFiles());
+
+      // Theme toggle
+      this.themeToggle.addEventListener('click', () => {
+        const next = this.theme === 'dark' ? 'light' : 'dark';
+        this._applyTheme(next);
+        this.savePreferences();
+      });
 
       // Settings button toggles cleaning options
       this.settingsBtn.addEventListener('click', () => {
@@ -1748,6 +1757,7 @@
 
     savePreferences() {
       const prefs = {
+        theme: this.theme,
         openMode: this.getOpenMode(),
         cleaningOptions: this.getCleaningOptions(),
         settingsOpen: !this.cleaningOptions.classList.contains('hidden'),
@@ -1913,6 +1923,11 @@
           }
           const dupChecked = document.getElementById('opt-duplicates')?.checked;
           document.getElementById('dup-mode')?.classList.toggle('hidden', !dupChecked);
+
+          // Theme (stored pref overrides system default set by initTheme)
+          if (prefs.theme) {
+            this._applyTheme(prefs.theme);
+          }
 
           // Settings panel open state
           if (prefs.settingsOpen) {
@@ -3954,6 +3969,35 @@
       const el = document.createElement('span');
       el.textContent = str;
       return el.innerHTML;
+    }
+
+    initTheme() {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      this.theme = prefersDark ? 'dark' : 'light';
+      this._applyTheme(this.theme);
+    }
+
+    _applyTheme(theme) {
+      this.theme = theme;
+      const isDark = theme === 'dark';
+      if (isDark) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      const label = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+      if (this.themeToggle) {
+        this.themeToggle.title = label;
+        this.themeToggle.setAttribute('aria-label', label);
+        const icon = this.themeToggle.querySelector('[data-lucide]');
+        if (icon) {
+          const nextIcon = isDark ? 'sun' : 'moon';
+          icon.setAttribute('data-lucide', nextIcon);
+          if (window.lucide?.createIcons) {
+            window.lucide.createIcons({ root: this.themeToggle });
+          }
+        }
+      }
     }
 
     iconMarkup(name, className = 'app-icon') {

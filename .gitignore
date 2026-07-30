@@ -3,3 +3,4 @@ scripts/
 *.log
 *.bak
 .claude/
+dist/extension/
