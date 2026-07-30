@@ -758,6 +758,10 @@ body {
   flex-shrink: 0;
 }
 
+.checkbox-label input[type="checkbox"] {
+  border-radius: 50%;
+}
+
 .radio-sub {
   font-size: 12px;
   padding: 2px 0;
