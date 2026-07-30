@@ -142,6 +142,9 @@ if (typeof global.DragToSheetsApp !== 'function') {
 function setupDOM() {
   window.lucide = global.lucide;
   document.body.innerHTML = `
+    <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+      <i data-lucide="moon" class="app-icon" aria-hidden="true"></i>
+    </button>
     <div id="drop-zone" tabindex="0"></div>
     <input type="file" id="file-input" multiple>
     <ul id="file-list"></ul>

@@ -71,6 +71,9 @@ function makeFile(name, text) {
 function setupPanelDom() {
   window.lucide = global.lucide;
   document.body.innerHTML = `
+    <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+      <i data-lucide="moon" class="app-icon" aria-hidden="true"></i>
+    </button>
     <div id="drop-zone"></div>
     <input id="file-input" type="file" multiple>
     <ul id="file-list"></ul>
