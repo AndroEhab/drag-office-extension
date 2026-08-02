@@ -5,7 +5,7 @@
   "version_name": "1.0.0",
   "description": "Drag spreadsheet files to open and clean them in Google Sheets",
   "author": { "email": "support@dragtosheets.app" },
-  "homepage_url": "https://androehab.github.io/drag-to-sheets/",
+  "homepage_url": "https://www.dragtosheets.com/",
   "minimum_chrome_version": "116",
   "permissions": [
     "sidePanel",

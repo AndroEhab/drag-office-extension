@@ -4,90 +4,218 @@
   <meta name="google-site-verification" content="qNSvpNUoegj3HtnIpKWwljNAwK9OnnopUEbGJ7Wv8i8" />
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Drag to Sheets</title>
-  <style>
-    @font-face { font-family:'Roboto'; font-style:normal; font-weight:100 900; font-display:swap; src:url('sidepanel/fonts/Roboto-Variable.woff2') format('woff2'); }
-    body { font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 680px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.7; color: #333; }
-    h1 { font-size: 1.6rem; display: flex; align-items: center; gap: 0.6rem; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.5rem; }
-    h1 img { width: 32px; height: 32px; }
-    h2 { font-size: 1.15rem; margin-top: 2rem; }
-    ul { padding-left: 1.2rem; }
-    li { margin-bottom: 0.3rem; }
-    code { background: #f4f4f4; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
-    .tag { display: inline-block; background: #e8f0fe; color: #1a73e8; font-size: 0.8rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 3px; margin-right: 0.3rem; }
-    .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e0e0e0; font-size: 0.9rem; color: #666; }
-    a { color: #1a73e8; }
-  </style>
+  <meta name="description" content="Drag to Sheets turns CSV, TSV, and Excel files into clean Google Sheets in a few clicks, with local-first processing.">
+  <meta name="theme-color" content="#f5f8f4">
+  <title>Drag to Sheets — From file to Sheets, without the busywork</title>
+  <link rel="stylesheet" href="site.css">
 </head>
 <body>
-  <h1>
-    Drag to Sheets
-  </h1>
-  <p>Drag spreadsheet files into a Chrome side panel, clean them up, and open them in Google Sheets — all without uploading your data until you're ready.</p>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Drag to Sheets home">
+        <img src="logo/Untitled-4.png" alt="">
+        <span>Drag to <em>Sheets</em></span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary navigation">
+        <a href="#features">Features</a>
+        <a href="#workflow">How it works</a>
+        <a href="#privacy">Privacy</a>
+      </nav>
+      <div class="header-actions">
+        <a class="header-quiet-link" href="terms.html">Terms</a>
+        <a class="button button-primary" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+          Add to Chrome
+        </a>
+        <button class="menu-toggle" type="button" aria-controls="site-nav" aria-expanded="false" aria-label="Open navigation">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
 
-  <h2>Supported file types</h2>
-  <ul>
-    <li><span class="tag">CSV</span> <code>.csv</code></li>
-    <li><span class="tag">TSV</span> <code>.tsv</code></li>
-    <li><span class="tag">Excel</span> <code>.xlsx</code> &amp; <code>.xls</code></li>
-  </ul>
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <p class="eyebrow">The calm way to move data</p>
+          <h1>From file to <span class="highlight">Sheets</span>, without the busywork.</h1>
+          <p class="hero-lead">Drop in a spreadsheet, tidy it up, and open a polished Google Sheet. Drag to Sheets keeps the messy middle quick, visible, and on your device.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+              Download from Chrome Web Store
+            </a>
+            <a class="button button-secondary" href="#features">Explore the workflow</a>
+          </div>
+          <div class="hero-proof" aria-label="Product highlights">
+            <span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>Local-first processing</span>
+            <span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>CSV, TSV, Excel</span>
+          </div>
+        </div>
 
-  <h2>How it works</h2>
-  <p><strong>File parsing, previewing, cleaning, and merging all happen locally on your device.</strong> Your data never leaves your computer unless you take action.</p>
-  <p>When you click <strong>Open in Sheets</strong>, the extension sends your data to Google via the official Sheets and Drive APIs to create a spreadsheet in your Google account. No data is ever sent to our servers.</p>
+        <div class="product-stage" aria-label="Drag to Sheets product preview">
+          <div class="product-window">
+            <div class="window-bar" aria-hidden="true">
+              <span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span>
+              <span class="window-url">drag-to-sheets · Chrome side panel</span>
+            </div>
+            <img src="screenshots/Captura de pantalla 2025-12-05 215717.png" alt="Drag to Sheets side panel showing two spreadsheet files ready to open in Google Sheets">
+          </div>
+          <div class="product-label">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="8"/></svg>
+            <span>See every change before it reaches your Sheet.</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
-  <h2>Built-in cleaning tools</h2>
-  <ul>
-    <li>Trim whitespace</li>
-    <li>Remove empty rows and columns</li>
-    <li>Remove duplicate rows</li>
-    <li>Fix number formatting</li>
-    <li>Normalize dates</li>
-    <li>Normalize headers</li>
-  </ul>
-    <h1>Terms of Use for Drag to Sheets</h1>
-  <p><strong>Last updated:</strong> July 2026</p>
- 
-  <h2>1. Acceptance of Terms</h2>
-  <p>By installing or using the Drag to Sheets Chrome extension ("the Extension"), you agree to these Terms of Use. If you do not agree, do not install or use the Extension.</p>
- 
-  <h2>2. Description of Service</h2>
-  <p>Drag to Sheets is a free Chrome extension that lets you drag and drop spreadsheet files (CSV, TSV, XLSX, XLS) into a browser side panel, clean and preview the data locally, and optionally send the result to your own Google account as a Google Sheets spreadsheet via the official Google Sheets and Drive APIs.</p>
- 
-  <h2>3. Your Google Account</h2>
-  <p>To use the "Open in Sheets" feature, you must sign in with your own Google account and grant the Extension permission to create and edit spreadsheets on your behalf. The Extension only creates and modifies files that it itself creates through your explicit action — it does not access, list, or modify any other files in your Google Drive. You are responsible for maintaining the security of your own Google account.</p>
- 
-  <h2>4. Your Data and Files</h2>
-  <p>You retain full ownership of any files you process with the Extension and any spreadsheets created in your Google account as a result. File parsing, cleaning, and previewing happen locally on your device; data is only transmitted to Google when you explicitly choose to open it in Google Sheets. See the <a href="privacy.html">Privacy Policy</a> for full details on data handling.</p>
- 
-  <h2>5. Acceptable Use</h2>
-  <p>You agree not to use the Extension for any unlawful purpose, to attempt to reverse engineer or interfere with its operation beyond what is permitted by its open-source license, or to use it in a way that violates Google's Terms of Service or API usage policies.</p>
- 
-  <h2>6. Intellectual Property</h2>
-  <p>The Extension's source code is publicly available and licensed under the terms specified in its repository. The "Drag to Sheets" name and icon are used to identify this project and are not licensed for use by unrelated products or services.</p>
- 
-  <h2>7. No Warranty</h2>
-  <p>The Extension is provided "as is," without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement. Use of the Extension is at your own risk.</p>
- 
-  <h2>8. Limitation of Liability</h2>
-  <p>To the maximum extent permitted by law, the developer of Drag to Sheets shall not be liable for any indirect, incidental, special, or consequential damages, or any loss of data, profits, or use, arising out of or in connection with your use of the Extension.</p>
- 
-  <h2>9. Third-Party Services</h2>
-  <p>The Extension relies on Google APIs (Sheets, Drive, and Identity) to function. Your use of these services through the Extension is also subject to Google's own Terms of Service and Privacy Policy.</p>
- 
-  <h2>10. Changes to These Terms</h2>
-  <p>These Terms of Use may be updated from time to time. Continued use of the Extension after changes are posted constitutes acceptance of the revised terms. The "Last updated" date at the top of this page reflects the most recent revision.</p>
- 
-  <h2>11. Termination</h2>
-  <p>You may stop using the Extension at any time by uninstalling it from Chrome and revoking its access from your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account permissions</a> page.</p>
- 
-  <h2>12. Contact</h2>
-  <p>If you have questions about these Terms of Use, contact us at <a href="mailto:support@dragtosheets.app">support@dragtosheets.app</a>.</p>
-  <h2>Privacy</h2>
-  <p>Your data stays private. No analytics, telemetry, or tracking code is included. See the <a href="privacy.html">privacy policy</a> for full details.</p>
+    <section class="format-strip" aria-label="Supported file formats">
+      <div class="container format-strip-inner">
+        <div class="format-copy"><strong>Bring the formats you already use.</strong>One focused workflow for everyday spreadsheet handoffs.</div>
+        <ul class="format-list">
+          <li>CSV</li>
+          <li>TSV</li>
+          <li>XLSX</li>
+          <li>XLS</li>
+        </ul>
+      </div>
+    </section>
 
-  <div class="footer">
-    <p><a href="privacy.html">Privacy Policy</a> &middot; <a href="mailto:support@dragtosheets.app">support@dragtosheets.app</a></p>
-  </div>
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-heading">
+          <div>
+            <p class="kicker">A better handoff</p>
+            <h2>Less cleanup. More confidence.</h2>
+          </div>
+          <p>The useful parts of a spreadsheet workflow, made simple enough to stay out of your way.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="icon-box"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></div>
+            <h3>Drop in, don’t configure</h3>
+            <p>Bring one file or a batch. CSV, TSV, XLSX, and XLS files all start from the same clean drop zone.</p>
+          </article>
+          <article class="feature-card">
+            <div class="icon-box"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/><path d="m17 16 2 2 4-4"/></svg></div>
+            <h3>Clean before you open</h3>
+            <p>Trim whitespace, remove empty rows, fix number formatting, normalize headers, and preview the result first.</p>
+          </article>
+          <article class="feature-card">
+            <div class="icon-box"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M10 12h4M12 10l2 2-2 2"/></svg></div>
+            <h3>Merge with confidence</h3>
+            <p>Open files separately or combine them into one sheet with smart header matching and custom column mapping.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="privacy">
+      <div class="container split-section">
+        <div class="split-copy">
+          <p class="kicker">Your data, your call</p>
+          <h2>Private by default. Deliberate when it counts.</h2>
+          <p>Parsing, cleaning, merging, and previewing happen locally in Chrome. Data only moves to Google when you explicitly choose to open it in Sheets.</p>
+          <ul class="check-list">
+            <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg><span>No analytics, telemetry, or tracking code.</span></li>
+            <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg><span>Uses official Google Sheets and Drive APIs.</span></li>
+            <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg><span>Review the full <a href="privacy.html">privacy policy</a>.</span></li>
+          </ul>
+        </div>
+        <div class="gallery-card" aria-label="Product screenshots showing cleaning and merge controls">
+          <figure class="gallery-main">
+            <img src="screenshots/Captura de pantalla 2025-12-04 034106.png" alt="Drag to Sheets merge mode with smart mapping and cleaning options expanded">
+          </figure>
+          <figure class="gallery-side">
+            <img src="screenshots/Captura de pantalla 2025-12-05 195830.png" alt="Drag to Sheets cleaning options and preview for a single file">
+          </figure>
+          <div class="gallery-caption"><strong>Make the call before upload.</strong> Mapping, cleaning, and preview stay in one focused side panel.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section workflow-section" id="workflow">
+      <div class="container">
+        <div class="section-heading">
+          <div>
+            <p class="kicker">The workflow</p>
+            <h2>Three steps. One clean destination.</h2>
+          </div>
+          <p>Designed for the moment between “here’s the file” and “it’s ready to use.”</p>
+        </div>
+        <div class="workflow-grid">
+          <article class="workflow-step">
+            <span class="step-number">01</span>
+            <h3>Drop your files</h3>
+            <p>Open the Chrome side panel and drop in a spreadsheet or click to browse.</p>
+          </article>
+          <article class="workflow-step">
+            <span class="step-number">02</span>
+            <h3>Shape the data</h3>
+            <p>Preview rows, apply cleaning options, and map columns when files need to line up.</p>
+          </article>
+          <article class="workflow-step">
+            <span class="step-number">03</span>
+            <h3>Open in Sheets</h3>
+            <p>Send the finished result to your Google account through the official APIs.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="callout">
+          <div>
+            <p class="kicker">Ready when your next file is</p>
+            <h2>Turn the spreadsheet handoff into the easy part.</h2>
+            <p>Free to use, built for Chrome, and made for the work that happens before the Sheet is ready.</p>
+          </div>
+          <a class="button button-light" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+            Add to Chrome
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-copy">
+        <a class="brand" href="index.html" aria-label="Drag to Sheets home">
+          <img src="logo/Untitled-4.png" alt="">
+          <span>Drag to <em>Sheets</em></span>
+        </a>
+        <p>© 2026 Drag to Sheets. A focused Chrome workflow for spreadsheet files.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="privacy.html">Privacy policy</a>
+        <a href="terms.html">Terms of use</a>
+        <a href="mailto:support@dragtosheets.app">Contact</a>
+        <a href="https://github.com/AndroEhab/drag-to-sheets" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    const menuToggle = document.querySelector('.menu-toggle');
+    const siteNav = document.querySelector('#site-nav');
+
+    menuToggle?.addEventListener('click', () => {
+      const isOpen = siteNav.classList.toggle('is-open');
+      menuToggle.setAttribute('aria-expanded', String(isOpen));
+      menuToggle.setAttribute('aria-label', isOpen ? 'Close navigation' : 'Open navigation');
+    });
+
+    siteNav?.querySelectorAll('a').forEach((link) => {
+      link.addEventListener('click', () => {
+        siteNav.classList.remove('is-open');
+        menuToggle?.setAttribute('aria-expanded', 'false');
+        menuToggle?.setAttribute('aria-label', 'Open navigation');
+      });
+    });
+  </script>
 </body>
 </html>
