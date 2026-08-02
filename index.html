@@ -18,13 +18,12 @@
       </a>
       <nav class="site-nav" id="site-nav" aria-label="Primary navigation">
         <a href="#features">Features</a>
-        <a href="#workflow">How it works</a>
-        <a href="#privacy">Privacy</a>
+        <a href="privacy.html">Privacy</a>
       </nav>
       <div class="header-actions">
         <a class="header-quiet-link" href="terms.html">Terms</a>
         <a class="button button-primary" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+          <img class="chrome-logo" src="logo/chrome.png" alt="">
           Add to Chrome
         </a>
         <button class="menu-toggle" type="button" aria-controls="site-nav" aria-expanded="false" aria-label="Open navigation">
@@ -43,14 +42,13 @@
           <p class="hero-lead">Drop in a spreadsheet, tidy it up, and open a polished Google Sheet. Drag to Sheets keeps the messy middle quick, visible, and on your device.</p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+              <img class="chrome-logo" src="logo/chrome.png" alt="">
               Download from Chrome Web Store
             </a>
-            <a class="button button-secondary" href="#features">Explore the workflow</a>
+            <a class="button button-secondary" href="#features">Explore the features</a>
           </div>
-          <div class="hero-proof" aria-label="Product highlights">
-            <span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>Local-first processing</span>
-            <span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>CSV, TSV, Excel</span>
+          <div class="hero-route" aria-label="Workflow steps">
+            <span>01 Drop</span><b>→</b><span>02 Shape</span><b>→</b><span>03 Sheet</span>
           </div>
         </div>
 
@@ -86,83 +84,66 @@
       <div class="container">
         <div class="section-heading">
           <div>
-            <p class="kicker">A better handoff</p>
-            <h2>Less cleanup. More confidence.</h2>
+            <p class="kicker">What it handles</p>
+            <h2>Everything before Sheets.</h2>
           </div>
-          <p>The useful parts of a spreadsheet workflow, made simple enough to stay out of your way.</p>
         </div>
-        <div class="feature-grid">
-          <article class="feature-card">
-            <div class="icon-box"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></div>
-            <h3>Drop in, don’t configure</h3>
-            <p>Bring one file or a batch. CSV, TSV, XLSX, and XLS files all start from the same clean drop zone.</p>
+        <div class="feature-list">
+          <article class="feature-row">
+            <span class="feature-index">01 / IMPORT</span>
+            <h3>Bring in any spreadsheet</h3>
+            <div>
+              <p>Drop files into the Chrome side panel, browse from your computer, or import from a URL.</p>
+              <ul class="feature-points">
+                <li>CSV</li>
+                <li>TSV</li>
+                <li>XLSX</li>
+                <li>XLS</li>
+              </ul>
+            </div>
           </article>
-          <article class="feature-card">
-            <div class="icon-box"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/><path d="m17 16 2 2 4-4"/></svg></div>
-            <h3>Clean before you open</h3>
-            <p>Trim whitespace, remove empty rows, fix number formatting, normalize headers, and preview the result first.</p>
+          <article class="feature-row">
+            <span class="feature-index">02 / CLEAN</span>
+            <h3>Fix the messy middle</h3>
+            <div>
+              <p>Apply the cleanup you need before anything reaches Google Sheets, with a preview of the result.</p>
+              <ul class="feature-points">
+                <li>Whitespace</li>
+                <li>Empty rows and columns</li>
+                <li>Duplicates</li>
+                <li>Numbers and dates</li>
+                <li>Headers</li>
+              </ul>
+            </div>
           </article>
-          <article class="feature-card">
-            <div class="icon-box"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M10 12h4M12 10l2 2-2 2"/></svg></div>
-            <h3>Merge with confidence</h3>
-            <p>Open files separately or combine them into one sheet with smart header matching and custom column mapping.</p>
+          <article class="feature-row">
+            <span class="feature-index">03 / MERGE</span>
+            <h3>Make files line up</h3>
+            <div>
+              <p>Open files separately or merge them into one sheet with smart header matching and custom column mapping.</p>
+              <ul class="feature-points">
+                <li>Smart mapping</li>
+                <li>Custom mapping</li>
+                <li>Worksheet selection</li>
+              </ul>
+            </div>
+          </article>
+          <article class="feature-row">
+            <span class="feature-index">04 / OPEN</span>
+            <h3>Send the finished data</h3>
+            <div>
+              <p>Open a clean result in your Google account through the official Sheets and Drive APIs. See the <a href="privacy.html">privacy policy</a> for data handling.</p>
+              <ul class="feature-points">
+                <li>Separate sheets</li>
+                <li>One merged sheet</li>
+                <li>Local-first processing</li>
+              </ul>
+            </div>
           </article>
         </div>
       </div>
     </section>
 
-    <section class="section" id="privacy">
-      <div class="container split-section">
-        <div class="split-copy">
-          <p class="kicker">Your data, your call</p>
-          <h2>Private by default. Deliberate when it counts.</h2>
-          <p>Parsing, cleaning, merging, and previewing happen locally in Chrome. Data only moves to Google when you explicitly choose to open it in Sheets.</p>
-          <ul class="check-list">
-            <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg><span>No analytics, telemetry, or tracking code.</span></li>
-            <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg><span>Uses official Google Sheets and Drive APIs.</span></li>
-            <li><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg><span>Review the full <a href="privacy.html">privacy policy</a>.</span></li>
-          </ul>
-        </div>
-        <div class="gallery-card" aria-label="Product screenshots showing cleaning and merge controls">
-          <figure class="gallery-main">
-            <img src="screenshots/Captura de pantalla 2025-12-04 034106.png" alt="Drag to Sheets merge mode with smart mapping and cleaning options expanded">
-          </figure>
-          <figure class="gallery-side">
-            <img src="screenshots/Captura de pantalla 2025-12-05 195830.png" alt="Drag to Sheets cleaning options and preview for a single file">
-          </figure>
-          <div class="gallery-caption"><strong>Make the call before upload.</strong> Mapping, cleaning, and preview stay in one focused side panel.</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section workflow-section" id="workflow">
-      <div class="container">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">The workflow</p>
-            <h2>Three steps. One clean destination.</h2>
-          </div>
-          <p>Designed for the moment between “here’s the file” and “it’s ready to use.”</p>
-        </div>
-        <div class="workflow-grid">
-          <article class="workflow-step">
-            <span class="step-number">01</span>
-            <h3>Drop your files</h3>
-            <p>Open the Chrome side panel and drop in a spreadsheet or click to browse.</p>
-          </article>
-          <article class="workflow-step">
-            <span class="step-number">02</span>
-            <h3>Shape the data</h3>
-            <p>Preview rows, apply cleaning options, and map columns when files need to line up.</p>
-          </article>
-          <article class="workflow-step">
-            <span class="step-number">03</span>
-            <h3>Open in Sheets</h3>
-            <p>Send the finished result to your Google account through the official APIs.</p>
-          </article>
-        </div>
-      </div>
-    </section>
 
     <section class="section">
       <div class="container">
@@ -173,7 +154,7 @@
             <p>Free to use, built for Chrome, and made for the work that happens before the Sheet is ready.</p>
           </div>
           <a class="button button-light" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+            <img class="chrome-logo" src="logo/chrome.png" alt="">
             Add to Chrome
           </a>
         </div>
