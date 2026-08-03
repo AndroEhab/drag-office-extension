@@ -4,10 +4,62 @@
   <meta name="google-site-verification" content="qNSvpNUoegj3HtnIpKWwljNAwK9OnnopUEbGJ7Wv8i8" />
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Drag to Sheets turns CSV, TSV, and Excel files into clean Google Sheets in a few clicks, with local-first processing.">
-  <meta name="theme-color" content="#f5f8f4">
-  <title>Drag to Sheets — From file to Sheets, without the busywork</title>
+  <meta name="description" content="Chrome extension to import CSV and Excel files, clean and merge spreadsheet data locally, and open the result in Google Sheets.">
+  <meta name="theme-color" content="#f4faf6">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://www.dragtosheets.com/">
+  <link rel="icon" href="logo/Untitled-4-48x48.png" type="image/png" sizes="48x48">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Drag to Sheets">
+  <meta property="og:title" content="Drag to Sheets — Clean spreadsheet files in Google Sheets">
+  <meta property="og:description" content="Import CSV and Excel files, clean and merge data locally, then open the finished result in Google Sheets.">
+  <meta property="og:url" content="https://www.dragtosheets.com/">
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Drag to Sheets — Clean spreadsheet files in Google Sheets">
+  <meta name="twitter:description" content="Import CSV and Excel files, clean and merge data locally, then open the finished result in Google Sheets.">
+  <title>Drag to Sheets — Clean spreadsheet files in Google Sheets</title>
   <link rel="stylesheet" href="site.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://www.dragtosheets.com/#website",
+        "url": "https://www.dragtosheets.com/",
+        "name": "Drag to Sheets",
+        "description": "Chrome extension to import, clean, merge, and open spreadsheet files in Google Sheets.",
+        "inLanguage": "en"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://www.dragtosheets.com/#application",
+        "name": "Drag to Sheets",
+        "applicationCategory": "BusinessApplication",
+        "applicationSubCategory": "Spreadsheet",
+        "operatingSystem": "Google Chrome",
+        "browserRequirements": "Requires Google Chrome",
+        "url": "https://www.dragtosheets.com/",
+        "description": "Drag to Sheets imports CSV, TSV, XLSX, and XLS files, cleans and merges spreadsheet data locally, and opens the result in Google Sheets.",
+        "isPartOf": {
+          "@id": "https://www.dragtosheets.com/#website"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Import CSV, TSV, XLSX, and XLS files",
+          "Clean whitespace, empty rows, empty columns, duplicates, numbers, dates, and headers",
+          "Merge files with smart header matching and custom column mapping",
+          "Open cleaned data in Google Sheets"
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <header class="site-header">
@@ -37,15 +89,13 @@
     <section class="hero">
       <div class="container hero-grid">
         <div>
-          <p class="eyebrow">The calm way to move data</p>
-          <h1>From file to <span class="highlight">Sheets</span>, without the busywork.</h1>
+          <h1>Import, clean, and open spreadsheet files in Google <span class="highlight">Sheets</span>.</h1>
           <p class="hero-lead">Drop in a spreadsheet, tidy it up, and open a polished Google Sheet. Drag to Sheets keeps the messy middle quick, visible, and on your device.</p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://chromewebstore.google.com/search/Drag%20to%20Sheets" target="_blank" rel="noopener">
               <img class="chrome-logo" src="logo/chrome.png" alt="">
               Download from Chrome Web Store
             </a>
-            <a class="button button-secondary" href="#features">Explore the features</a>
           </div>
           <div class="hero-route" aria-label="Workflow steps">
             <span>01 Drop</span><b>→</b><span>02 Shape</span><b>→</b><span>03 Sheet</span>
@@ -68,24 +118,14 @@
       </div>
     </section>
 
-    <section class="format-strip" aria-label="Supported file formats">
-      <div class="container format-strip-inner">
-        <div class="format-copy"><strong>Bring the formats you already use.</strong>One focused workflow for everyday spreadsheet handoffs.</div>
-        <ul class="format-list">
-          <li>CSV</li>
-          <li>TSV</li>
-          <li>XLSX</li>
-          <li>XLS</li>
-        </ul>
-      </div>
-    </section>
 
-    <section class="section" id="features">
+    <section class="section" id="features" aria-labelledby="features-heading">
       <div class="container">
         <div class="section-heading">
           <div>
-            <p class="kicker">What it handles</p>
-            <h2>Everything before Sheets.</h2>
+            <p class="kicker">How to use Drag to Sheets</p>
+            <h2 id="features-heading">Clean spreadsheet files before Google Sheets.</h2>
+            <p>Drop a CSV, TSV, XLSX, or XLS file into the Chrome side panel, review the cleanup, then open a clean result in Google Sheets.</p>
           </div>
         </div>
         <div class="feature-list">

@@ -21,7 +21,6 @@ function collectProductionFiles(rootDir) {
     files.add(f);
   }
 
-  files.add('images/logo-horizontal.png');
   files.add('privacy.html');
 
   const sidepanelDir = path.join(rootDir, 'sidepanel');

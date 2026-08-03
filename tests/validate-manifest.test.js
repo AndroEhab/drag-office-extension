@@ -55,17 +55,21 @@ describe('validateIconSizes', () => {
     const manifestPath = path.join(ROOT, 'manifest.json');
     const original = require(manifestPath);
     const patched = JSON.parse(JSON.stringify(original));
-    patched.icons['16'] = 'images/logo-horizontal.png';
+    patched.icons['16'] = 'images/icon-48.png';
 
-    const restore = jest.spyOn(require('fs'), 'readFileSync').mockImplementationOnce((fp) => {
+    const restore = jest.spyOn(require('fs'), 'readFileSync').mockImplementation((fp) => {
       if (fp === manifestPath) return JSON.stringify(patched, null, 2);
-      return require('fs').readFileSync(fp);
+      // Return fake non-square PNG buffer (48×32)
+      const buf = Buffer.alloc(24);
+      buf.writeUInt32BE(48, 16); // width
+      buf.writeUInt32BE(32, 20); // height
+      return buf;
     });
 
     try {
       const errors = validateIconSizes(ROOT);
       expect(errors.length).toBeGreaterThanOrEqual(1);
-      expect(errors[0].file).toBe('images/logo-horizontal.png');
+      expect(errors[0].file).toBe('images/icon-48.png');
       expect(errors[0].expected).toBe('16\u00D716');
     } finally {
       restore.mockRestore();

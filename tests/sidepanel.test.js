@@ -3295,6 +3295,69 @@ describe('DragToSheetsApp', () => {
       expect(fromOptions).not.toContain('First Name');
     });
 
+    test('shows manual mapping section even when smart mapping checkbox is unchecked', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      document.getElementById('opt-smart-mapping').checked = false;
+      app.customMappings = [{ from: 'email_address', to: '' }];
+      app.files = [
+        {
+          name: 'master.csv',
+          ext: 'csv',
+          parsed: { sheets: [{ name: 'Master', data: [['id', 'first_name', 'email'], ['1', 'Harry', 'harry@example.com']] }] },
+        },
+        {
+          name: 'source.csv',
+          ext: 'csv',
+          parsed: { sheets: [{ name: 'Source', data: [['id', 'email_address', 'email'], ['2', 'ryan.alt@example.com', 'ryan@example.com']] }] },
+        },
+      ];
+
+      await app.updateCustomMappingVisibility();
+
+      // The manual mapping section (and the Add mapping button) must not depend
+      // on the "Match common header variants automatically" checkbox being checked.
+      expect(app.customMappingOption.classList.contains('hidden')).toBe(false);
+      expect(app.customMappingAddBtn.disabled).toBe(false);
+
+      const selects = app.customMappingList.querySelectorAll('select');
+      const fromOptions = Array.from(selects[0].querySelectorAll('option')).map((opt) => opt.value);
+      expect(fromOptions).toEqual(['', 'email_address']);
+
+      // Manually adding another mapping row should also work without the checkbox checked.
+      app.addCustomMapping();
+      await Promise.resolve();
+      expect(app.customMappingList.querySelectorAll('.custom-mapping-row').length).toBe(2);
+    });
+
+    test('applies manual mappings during merge even when smart mapping is off', async () => {
+      const app = await createApp();
+      document.getElementById('opt-smart-mapping').checked = false;
+      app.customMappings = [{ from: 'email_address', to: 'email' }];
+      app.files = [
+        {
+          name: 'master.csv',
+          ext: 'csv',
+          parsed: { sheets: [{ name: 'Master', data: [['id', 'first_name', 'email'], ['1', 'Harry', 'harry@example.com']] }] },
+        },
+        {
+          name: 'source.csv',
+          ext: 'csv',
+          parsed: { sheets: [{ name: 'Source', data: [['id', 'first_name', 'email_address'], ['2', 'Ryan', 'ryan@example.com']] }] },
+        },
+      ];
+
+      await app.getMergedProcessedData();
+
+      expect(Merger.merge).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          smartMapping: false,
+          customMappings: [{ from: 'email_address', to: 'email' }],
+        })
+      );
+    });
+
     test('does not pass stale hidden mappings into merge processing', async () => {
       const app = await createApp();
       document.getElementById('opt-smart-mapping').checked = true;

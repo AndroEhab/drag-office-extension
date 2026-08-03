@@ -3170,15 +3170,11 @@
           return;
         }
 
-        const shouldShowSection = this.smartMappingCheckbox.checked;
         this.syncCustomMappingsWithContext(context);
-        this.customMappingOption.classList.toggle(
-          'hidden',
-          !shouldShowSection || !context.hasCandidateHeaders
-        );
+        this.customMappingOption.classList.toggle('hidden', !context.hasCandidateHeaders);
         this.customMappingAddBtn.disabled = !context.hasCandidateHeaders;
 
-        if (shouldShowSection && context.hasCandidateHeaders) {
+        if (context.hasCandidateHeaders) {
           await this.renderCustomMappings(context);
         } else {
           this.customMappingList.innerHTML = '';
@@ -3244,7 +3240,6 @@
     async renderCustomMappings(context) {
       if (
         this.getOpenMode() !== 'merge' ||
-        !this.smartMappingCheckbox.checked ||
         this.files.length <= 1
       ) {
         this.customMappingList.innerHTML = '';
