@@ -106,7 +106,7 @@ function setupPanelDom() {
     <div id="loading-panel"><progress id="loading-panel-bar" max="100" value="0"></progress><div id="loading-spinner"></div><span id="loading-text"></span><span id="loading-sr-status"></span><span id="loading-sr-alert"></span></div>
     <button id="clear-btn" disabled>Clear</button>
     <button id="url-toggle" aria-expanded="false"></button>
-    <div id="url-bar" class="hidden"><input id="url-input"><button id="url-fetch-btn">Import</button></div>
+    <div id="url-bar" class="hidden"><input id="url-input"><button id="url-fetch-btn">Import</button><p class="url-hint">Only import files from URLs you trust.</p></div>
   `;
 }
 
@@ -352,7 +352,7 @@ describe('release-readiness regression suite', () => {
 
       await app.importFromUrl();
 
-      expect(app.loadingText.textContent).toContain('Only HTTPS URLs are supported');
+      expect(app.urlHint.textContent).toContain('Only HTTPS URLs are supported');
       expect(chrome.permissions.contains).not.toHaveBeenCalled();
       expect(chrome.permissions.request).not.toHaveBeenCalled();
       expect(global.fetch).not.toHaveBeenCalled();

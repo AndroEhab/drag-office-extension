@@ -1269,6 +1269,7 @@
       this.urlBar = document.getElementById('url-bar');
       this.urlInput = document.getElementById('url-input');
       this.urlFetchBtn = document.getElementById('url-fetch-btn');
+      this.urlHint = document.querySelector('.url-hint');
       this.smartMappingOption = document.getElementById('smart-mapping-option');
       this.smartMappingCheckbox = document.getElementById('opt-smart-mapping');
       this.mappingReview = document.getElementById('mapping-review');
@@ -1508,6 +1509,20 @@
       }
     }
 
+    showUrlTooltip(message) {
+      if (!this.urlHint) return;
+      if (!this._urlHintOriginal) {
+        this._urlHintOriginal = this.urlHint.textContent;
+      }
+      this.urlHint.textContent = message;
+      this.urlHint.classList.add('url-hint--error');
+      clearTimeout(this._urlTooltipTimer);
+      this._urlTooltipTimer = setTimeout(() => {
+        this.urlHint.textContent = this._urlHintOriginal;
+        this.urlHint.classList.remove('url-hint--error');
+      }, 2500);
+    }
+
     async importFromUrl() {
       const raw = this.urlInput.value.trim();
 
@@ -1516,12 +1531,12 @@
         url = new URL(raw);
       } catch {
         this.urlInput.classList.add('url-input--error');
-        this.setStatus('Enter a valid URL', 'warning');
+        this.showUrlTooltip('Enter a valid URL');
         return;
       }
       if (url.protocol !== 'https:') {
         this.urlInput.classList.add('url-input--error');
-        this.setStatus('Only HTTPS URLs are supported', 'warning');
+        this.showUrlTooltip('Only HTTPS URLs are supported');
         return;
       }
 
@@ -2041,6 +2056,8 @@
             'success'
           );
           this.saveFilesSession();
+        } else if (skippedDuplicates > 0) {
+          this.setStatus('File already loaded', 'info');
         }
 
         this.logTiming('handle files (lazy separate)', parseStart, {
@@ -2132,6 +2149,8 @@
         this.markFilesChanged();
         this.setStatus(`${this.files.length} file(s) ready`, 'success');
         this.saveFilesSession();
+      } else if (skippedDuplicates > 0) {
+        this.setStatus('File already loaded', 'info');
       }
 
       this.logTiming('handle files', parseStart, {

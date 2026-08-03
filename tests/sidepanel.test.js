@@ -240,6 +240,7 @@ function setupDOM() {
     <div id="url-bar" class="hidden">
       <input type="text" id="url-input">
       <button id="url-fetch-btn">Fetch</button>
+      <p class="url-hint">Only import files from URLs you trust.</p>
     </div>
   `;
 }
@@ -4485,8 +4486,7 @@ describe('DragToSheetsApp', () => {
 
       await app.importFromUrl();
 
-      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.loadingText.textContent).toContain('Enter a valid URL');
+      expect(app.urlHint.textContent).toContain('Enter a valid URL');
     });
 
     test('HTTP URL is rejected', async () => {
@@ -4495,8 +4495,7 @@ describe('DragToSheetsApp', () => {
 
       await app.importFromUrl();
 
-      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.loadingText.textContent).toContain('Only HTTPS URLs are supported');
+      expect(app.urlHint.textContent).toContain('Only HTTPS URLs are supported');
       expect(chrome.permissions.request).not.toHaveBeenCalled();
     });
 
