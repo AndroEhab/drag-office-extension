@@ -7,8 +7,10 @@
  * own download control, captures the resulting blob, and sends the file
  * bytes to the extension (background → side panel).
  *
- * WhatsApp Web's DOM is minified and version-sensitive; all selectors are
- * ordered fallback lists so a single UI change degrades gracefully.
+ * WhatsApp Web's DOM is minified and version-sensitive, so detection is
+ * anchored on the visible filename text (find the text node, walk up to the
+ * message bubble) rather than on unstable class names; all attribute
+ * selectors are ordered fallback lists.
  */
 (() => {
   'use strict';
@@ -31,7 +33,7 @@
     '#main [role="application"]',
   ];
 
-  const MESSAGE_ROOT_SELECTORS = [
+  const BUBBLE_SELECTORS = [
     '[data-id]',
     'div.message-in',
     'div.message-out',
@@ -54,6 +56,8 @@
     'a[download]',
   ];
 
+  const FILE_NAME_RE = /\.(?:csv|tsv|xlsx|xls)$/i;
+
   // ---- Blob capture registry (fed by the MAIN-world hooks) ----
 
   const capturedBlobs = new Map(); // blob: URL -> Blob
@@ -71,48 +75,12 @@
 
   // ---- Helpers ----
 
-  function isSupportedFile(name) {
-    const dot = String(name || '').lastIndexOf('.');
-    if (dot < 0) return false;
-    return EXTENSIONS.includes(String(name).slice(dot + 1).toLowerCase());
-  }
-
-  function findFileNamesInMessage(root) {
-    const names = [];
-    const push = (value) => {
-      const text = String(value || '').trim();
-      if (text && isSupportedFile(text) && !names.includes(text)) names.push(text);
-    };
-
-    // 1. title attributes of document nodes (stable, e.g. title="report.xlsx")
-    for (const node of root.querySelectorAll(DOCUMENT_NODE_SELECTORS.join(','))) {
-      push(node.getAttribute('title'));
-      push(node.getAttribute('aria-label'));
+  function findBubble(el) {
+    for (const selector of BUBBLE_SELECTORS) {
+      const match = el.closest(selector);
+      if (match) return match;
     }
-
-    // 2. text content of the message bubble
-    const text = root.textContent || '';
-    const matches = text.match(/[\w][\w .\-()]*\.(?:csv|tsv|xlsx|xls)\b/gi);
-    for (const m of matches || []) push(m);
-
-    return names;
-  }
-
-  function findMessageRoot(node) {
-    let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-    while (el && el !== document.body) {
-      if (MESSAGE_ROOT_SELECTORS.some((s) => el.matches && el.matches(s))) return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
-
-  function findDownloadControl(root) {
-    for (const selector of DOWNLOAD_CONTROL_SELECTORS) {
-      const found = root.querySelector(selector);
-      if (found) return found;
-    }
-    return null;
+    return el.closest('div') || el;
   }
 
   function createAddButton(fileName, messageRoot) {
@@ -178,6 +146,14 @@
     }
   }
 
+  function findDownloadControl(root) {
+    for (const selector of DOWNLOAD_CONTROL_SELECTORS) {
+      const found = root.querySelector(selector);
+      if (found) return found;
+    }
+    return null;
+  }
+
   function waitForCapturedBlob(btn) {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
@@ -198,42 +174,39 @@
     });
   }
 
-  // ---- Scanning ----
+  // ---- Scanning (anchored on the visible filename text) ----
 
-  function scanMessage(root) {
-    if (root.getAttribute && root.getAttribute(DONE_MARK)) return;
-    const names = findFileNamesInMessage(root);
-    if (names.length === 0) {
-      // Diagnostics: a file-like message (text contains "name.ext") that the
-      // supported-file matcher rejected — helps when WhatsApp changes its DOM.
-      const text = root.textContent || '';
-      if (/\.\w{2,5}\b/.test(text)) {
-        const docNodes = root.querySelectorAll(DOCUMENT_NODE_SELECTORS.join(',')).length;
-        console.info(
-          '[Drag to Sheets] file-like message not matched.',
-          'docNodes:', docNodes,
-          'text:', JSON.stringify(text.slice(0, 160))
-        );
-      }
-      return;
-    }
+  function attachToBubble(el, fileName) {
+    const bubble = findBubble(el);
+    if (!bubble || bubble.getAttribute && bubble.getAttribute(DONE_MARK)) return;
 
-    root.setAttribute(DONE_MARK, 'true');
-    const fileName = names[0];
+    bubble.setAttribute(DONE_MARK, 'true');
     console.info('[Drag to Sheets] found spreadsheet file:', fileName);
-    const btn = createAddButton(fileName, root);
 
-    // Place the button at the end of the message bubble.
-    const placement = root.querySelector('div.copyable-text, [data-pre-plain-text], div[role="row"]');
-    const target = placement || root;
-    target.appendChild(btn);
+    const btn = createAddButton(fileName, bubble);
+    const placement = bubble.querySelector('div.copyable-text, [data-pre-plain-text], div[role="row"]');
+    (placement || bubble).appendChild(btn);
   }
 
-  function scanContainer(container) {
-    for (const selector of MESSAGE_ROOT_SELECTORS) {
-      for (const el of container.querySelectorAll(selector)) {
-        scanMessage(el);
-      }
+  function scanFileMessages(container) {
+    const checkLeaf = (el) => {
+      if (el.childElementCount > 0) return;
+      const text = (el.textContent || '').trim();
+      if (!text || text.length > 200 || !FILE_NAME_RE.test(text)) return;
+      attachToBubble(el, text);
+    };
+
+    // Pass 1: text leaves that display a supported filename.
+    for (const el of container.querySelectorAll('div, span')) {
+      checkLeaf(el);
+    }
+    if (container.matches && container.matches('div, span')) checkLeaf(container);
+
+    // Pass 2: document nodes carrying the name in title/aria-label.
+    for (const el of container.querySelectorAll(DOCUMENT_NODE_SELECTORS.join(','))) {
+      const name = (el.getAttribute('title') || el.getAttribute('aria-label') || '').trim();
+      if (!name || !FILE_NAME_RE.test(name)) continue;
+      attachToBubble(el, name);
     }
   }
 
@@ -243,24 +216,15 @@
 
     console.info(
       '[Drag to Sheets] WhatsApp import active — observing',
-      target === document.body ? 'body (fallback)' : 'chat pane',
-      '· message roots found:', target.querySelectorAll(MESSAGE_ROOT_SELECTORS.join(',')).length
+      target === document.body ? 'body (fallback)' : 'chat pane'
     );
-    scanContainer(target);
+    scanFileMessages(target);
 
     const observer = new MutationObserver((mutations) => {
-      let scanned = false;
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          const root = findMessageRoot(node) || node;
-          if (!scanned) {
-            scanMessage(root);
-            scanContainer(root);
-            scanned = true;
-          } else {
-            scanMessage(root);
-          }
+          scanFileMessages(node);
         }
       }
     });
