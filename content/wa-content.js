@@ -207,6 +207,7 @@
 
     root.setAttribute(DONE_MARK, 'true');
     const fileName = names[0];
+    console.info('[Drag to Sheets] found spreadsheet file:', fileName);
     const btn = createAddButton(fileName, root);
 
     // Place the button at the end of the message bubble.
@@ -227,6 +228,7 @@
     const pane = CHAT_PANE_SELECTORS.map((s) => document.querySelector(s)).find(Boolean);
     const target = pane || document.querySelector('#main') || document.body;
 
+    console.info('[Drag to Sheets] WhatsApp import active — observing', target === document.body ? 'body (fallback)' : 'chat pane');
     scanContainer(target);
 
     const observer = new MutationObserver((mutations) => {
