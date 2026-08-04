@@ -1274,7 +1274,12 @@
     ingestWhatsAppFile(message) {
       const name = String(message?.name || 'whatsapp-file');
       const bytes = message?.bytes;
-      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0) return;
+      // Realm-independent check — the payload arrives structured-cloned.
+      const isArrayBuffer =
+        bytes instanceof ArrayBuffer ||
+        Object.prototype.toString.call(bytes) === '[object ArrayBuffer]';
+      console.info('[Drag to Sheets] panel ingest:', name, bytes && bytes.byteLength, 'isArrayBuffer:', isArrayBuffer);
+      if (!isArrayBuffer || bytes.byteLength === 0) return;
 
       const file = new File([bytes], name, { type: 'application/octet-stream' });
       this.setStatus(`Adding "${name}" from WhatsApp…`, 'loading');
