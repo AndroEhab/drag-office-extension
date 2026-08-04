@@ -79,7 +79,10 @@ describe('WhatsApp Web import content scripts', () => {
     loadScripts();
 
     let intercepted = false;
-    window.addEventListener('dts-wa-file-clicked', () => { intercepted = true; });
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (data && data.tag === 'dts-wa' && data.kind === 'clicked') intercepted = true;
+    });
 
     const blob = new Blob(['x'], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -99,6 +102,8 @@ describe('WhatsApp Web import content scripts', () => {
 
     const btn = document.querySelector('.dts-wa-add-btn');
     btn.click();
+    // The arm signal travels via postMessage (async) — let it land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // WhatsApp materialises the file with just a blob URL — no anchor click.
     const blob = new Blob(['x,y\n1,2'], { type: 'text/csv' });
@@ -125,6 +130,8 @@ describe('WhatsApp Web import content scripts', () => {
 
     const btn = document.querySelector('.dts-wa-add-btn');
     btn.click();
+    // The arm signal travels via postMessage (async) — let it land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Simulate WhatsApp materialising the download: blob URL + anchor click.
     const blob = new Blob(['a,b\n1,2'], { type: 'text/csv' });

@@ -19,11 +19,7 @@
   const MAX_FILE_BYTES = 50 * 1024 * 1024;
   const BTN_CLASS = 'dts-wa-add-btn';
   const DONE_MARK = 'data-dts-wa-added';
-  const FILE_EVENT = 'dts-wa-file';
-  const READY_EVENT = 'dts-wa-file-ready';
-  const CLICK_EVENT = 'dts-wa-file-clicked';
-  const ARM_EVENT = 'dts-wa-arm';
-  const DISARM_EVENT = 'dts-wa-disarm';
+  const TAG = 'dts-wa';
   const CAPTURE_TIMEOUT_MS = 12000;
 
   // ---- Selector fallbacks (most stable first) ----
@@ -64,10 +60,16 @@
 
   const capturedBlobs = new Map(); // blob: URL -> Blob
 
-  window.addEventListener(FILE_EVENT, (event) => {
-    const detail = event.detail || {};
-    if (detail.url && detail.blob) {
-      capturedBlobs.set(detail.url, detail.blob);
+  const sendToMain = (kind) => {
+    window.postMessage({ tag: TAG, dir: 'iso', kind }, '*');
+  };
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window && event.source !== null) return;
+    const data = event.data;
+    if (!data || data.tag !== TAG || data.dir !== 'main') return;
+    if (data.kind === 'file' && data.url && data.blob) {
+      capturedBlobs.set(data.url, data.blob);
       if (capturedBlobs.size > 100) {
         const oldest = capturedBlobs.keys().next().value;
         capturedBlobs.delete(oldest);
@@ -109,7 +111,7 @@
 
     try {
       // Arm the MAIN-world hooks, then trigger WhatsApp's own download.
-      window.dispatchEvent(new CustomEvent(ARM_EVENT));
+      sendToMain('arm');
 
       const control = findDownloadControl(messageRoot);
       if (control) {
@@ -140,9 +142,11 @@
         name: fileName,
         bytes,
       });
+      console.info('[Drag to Sheets] sent file to extension:', fileName, bytes.byteLength);
       btn.textContent = 'Added!';
       setTimeout(() => btn.remove(), 1500);
     } catch (err) {
+      console.error('[Drag to Sheets] import failed:', err);
       btn.textContent = 'Failed';
       setTimeout(reset, 2000);
     }
@@ -164,35 +168,37 @@
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
-        window.removeEventListener(CLICK_EVENT, onClick);
-        window.removeEventListener(READY_EVENT, onReady);
+        window.removeEventListener('message', onMessage);
         // Let any pending native anchor click still be suppressed, then disarm.
-        setTimeout(() => window.dispatchEvent(new CustomEvent(DISARM_EVENT)), 800);
+        setTimeout(() => sendToMain('disarm'), 800);
         resolve(blob);
       };
 
       const timeout = setTimeout(() => {
         if (settled) return;
         settled = true;
-        window.removeEventListener(CLICK_EVENT, onClick);
-        window.removeEventListener(READY_EVENT, onReady);
+        window.removeEventListener('message', onMessage);
         resolve(null);
       }, CAPTURE_TIMEOUT_MS);
 
-      const onClick = (event) => {
-        const detail = event.detail || {};
-        const url = detail.url;
-        const blob = url ? capturedBlobs.get(url) : null;
-        if (blob) finish(blob);
+      const onMessage = (event) => {
+        if (event.source !== window && event.source !== null) return;
+        const data = event.data;
+        if (!data || data.tag !== TAG || data.dir !== 'main') return;
+
+        if (data.kind === 'clicked') {
+          const blob = data.url ? capturedBlobs.get(data.url) : null;
+          if (blob) {
+            console.info('[Drag to Sheets] captured via anchor click', blob.size);
+            finish(blob);
+          }
+        } else if (data.kind === 'ready' && data.blob) {
+          console.info('[Drag to Sheets] captured via armed blob', data.blob.size);
+          finish(data.blob);
+        }
       };
 
-      const onReady = (event) => {
-        const blob = (event.detail || {}).blob;
-        if (blob) finish(blob);
-      };
-
-      window.addEventListener(CLICK_EVENT, onClick);
-      window.addEventListener(READY_EVENT, onReady);
+      window.addEventListener('message', onMessage);
     });
   }
 
