@@ -24,6 +24,13 @@ function getManifestReferencedFiles(rootDir) {
     files.add(manifest.background.service_worker);
   }
 
+  if (Array.isArray(manifest.content_scripts)) {
+    for (const entry of manifest.content_scripts) {
+      for (const js of entry.js || []) files.add(js);
+      for (const css of entry.css || []) files.add(css);
+    }
+  }
+
   if (manifest.side_panel && manifest.side_panel.default_path) {
     files.add(manifest.side_panel.default_path);
   }

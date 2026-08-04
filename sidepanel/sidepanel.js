@@ -1252,6 +1252,33 @@
       this.setupEvents();
       this.checkExcelSupport();
       await this.restoreSession();
+      this.announcePanelReady();
+    }
+
+    /**
+     * Tell the background worker the panel is ready, so any files captured
+     * from WhatsApp Web while it was closed are delivered now.
+     */
+    announcePanelReady() {
+      try {
+        chrome.runtime.sendMessage({ type: 'wa:panel-ready' }).catch(() => {});
+      } catch (_) {
+        // Background worker unavailable (e.g. in tests) — nothing to flush.
+      }
+    }
+
+    /**
+     * Add a file captured from WhatsApp Web through the normal file pipeline
+     * (parse → preview → upload), exactly like a dropped local file.
+     */
+    ingestWhatsAppFile(message) {
+      const name = String(message?.name || 'whatsapp-file');
+      const bytes = message?.bytes;
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0) return;
+
+      const file = new File([bytes], name, { type: 'application/octet-stream' });
+      this.setStatus(`Adding "${name}" from WhatsApp…`, 'loading');
+      void this.handleFiles([file]);
     }
 
     bindElements() {
@@ -1515,6 +1542,13 @@
 
       // Custom column mapping
       this.customMappingAddBtn.addEventListener('click', () => this.addCustomMapping());
+
+      // Files captured from WhatsApp Web (relayed by the background worker)
+      chrome.runtime.onMessage.addListener((message) => {
+        if (message && message.type === 'wa:file') {
+          this.ingestWhatsAppFile(message);
+        }
+      });
 
       // URL import
       this.urlToggle.addEventListener('click', () => this.toggleUrlBar());

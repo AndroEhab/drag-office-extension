@@ -75,8 +75,8 @@ describe('collectProductionFiles', () => {
     });
   });
 
-    test('total file count is 19', () => {
-      expect(files.length).toBe(19);
+    test('total file count is 22', () => {
+      expect(files.length).toBe(22);
   });
 });
 
@@ -183,7 +183,7 @@ describe('release ZIP', () => {
   });
 
   test('total ZIP entries matches production file count', () => {
-    expect(zipEntries.length).toBe(19);
+    expect(zipEntries.length).toBe(22);
   });
 
   test('normalizes entry timestamps for reproducible archives', () => {

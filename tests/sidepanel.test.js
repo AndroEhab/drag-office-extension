@@ -4989,6 +4989,52 @@ describe('DragToSheetsApp', () => {
     });
   });
 
+  describe('WhatsApp Web import', () => {
+    function getRuntimeListener() {
+      const calls = chrome.runtime.onMessage.addListener.mock.calls;
+      return calls[calls.length - 1][0];
+    }
+
+    test('announces panel readiness so stashed files can be flushed', async () => {
+      chrome.runtime.sendMessage.mockClear();
+      const app = await createApp();
+
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'wa:panel-ready' });
+      expect(app).toBeTruthy();
+    });
+
+    test('adds a file relayed from WhatsApp through the normal pipeline', async () => {
+      const app = await createApp();
+      Parser.parse.mockResolvedValue({
+        sheets: [{ name: 'wa', data: [['a', 'b'], ['1', '2']] }],
+      });
+      const listener = getRuntimeListener();
+      const bytes = new ArrayBuffer(7);
+      new Uint8Array(bytes).set(new TextEncoder().encode('a,b\n1,2'));
+
+      listener({ type: 'wa:file', name: 'wa.csv', bytes });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].name).toBe('wa.csv');
+    });
+
+    test('ignores WhatsApp messages without file bytes', async () => {
+      const app = await createApp();
+      const listener = getRuntimeListener();
+
+      listener({ type: 'wa:file', name: 'empty.csv' });
+      listener({ type: 'other' });
+      await Promise.resolve();
+
+      expect(app.files).toHaveLength(0);
+    });
+  });
+
   // ---- Merged CSV integration ----
 
   describe('merged CSV integration', () => {
