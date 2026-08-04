@@ -91,6 +91,32 @@ describe('WhatsApp Web import content scripts', () => {
     expect(intercepted).toBe(false);
   });
 
+  test('captures the blob directly when WhatsApp does not use an anchor click', async () => {
+    mountChat(
+      messageBubble('<span>data.csv</span><div role="button" data-icon="download"></div>')
+    );
+    loadScripts();
+
+    const btn = document.querySelector('.dts-wa-add-btn');
+    btn.click();
+
+    // WhatsApp materialises the file with just a blob URL — no anchor click.
+    const blob = new Blob(['x,y\n1,2'], { type: 'text/csv' });
+    blob._buffer = new TextEncoder().encode('x,y\n1,2').buffer;
+    URL.createObjectURL(blob);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+    const [msg] = chrome.runtime.sendMessage.mock.calls[0];
+    expect(msg.type).toBe('wa:file');
+    expect(msg.name).toBe('data.csv');
+    expect(new TextDecoder().decode(new Uint8Array(msg.bytes))).toBe('x,y\n1,2');
+  });
+
   test('clicking the button captures WhatsApp’s blob and sends the file', async () => {
     mountChat(
       messageBubble('<span>report.xlsx</span><div role="button" data-icon="download"></div>')

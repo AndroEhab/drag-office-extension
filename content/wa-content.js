@@ -20,8 +20,10 @@
   const BTN_CLASS = 'dts-wa-add-btn';
   const DONE_MARK = 'data-dts-wa-added';
   const FILE_EVENT = 'dts-wa-file';
+  const READY_EVENT = 'dts-wa-file-ready';
   const CLICK_EVENT = 'dts-wa-file-clicked';
   const ARM_EVENT = 'dts-wa-arm';
+  const DISARM_EVENT = 'dts-wa-disarm';
   const CAPTURE_TIMEOUT_MS = 12000;
 
   // ---- Selector fallbacks (most stable first) ----
@@ -156,21 +158,41 @@
 
   function waitForCapturedBlob(btn) {
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
+      let settled = false;
+
+      const finish = (blob) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         window.removeEventListener(CLICK_EVENT, onClick);
+        window.removeEventListener(READY_EVENT, onReady);
+        // Let any pending native anchor click still be suppressed, then disarm.
+        setTimeout(() => window.dispatchEvent(new CustomEvent(DISARM_EVENT)), 800);
+        resolve(blob);
+      };
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener(CLICK_EVENT, onClick);
+        window.removeEventListener(READY_EVENT, onReady);
         resolve(null);
       }, CAPTURE_TIMEOUT_MS);
 
       const onClick = (event) => {
-        const url = (event.detail || {}).url;
+        const detail = event.detail || {};
+        const url = detail.url;
         const blob = url ? capturedBlobs.get(url) : null;
-        if (!blob) return;
-        clearTimeout(timeout);
-        window.removeEventListener(CLICK_EVENT, onClick);
-        resolve(blob);
+        if (blob) finish(blob);
+      };
+
+      const onReady = (event) => {
+        const blob = (event.detail || {}).blob;
+        if (blob) finish(blob);
       };
 
       window.addEventListener(CLICK_EVENT, onClick);
+      window.addEventListener(READY_EVENT, onReady);
     });
   }
 
