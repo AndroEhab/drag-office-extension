@@ -192,8 +192,16 @@
     const checkLeaf = (el) => {
       if (el.childElementCount > 0) return;
       const text = (el.textContent || '').trim();
-      if (!text || text.length > 200 || !FILE_NAME_RE.test(text)) return;
-      attachToBubble(el, text);
+      if (!text || text.length > 200) return;
+      if (FILE_NAME_RE.test(text)) {
+        attachToBubble(el, text);
+        return;
+      }
+      // Diagnostics: a supported filename appears mid-text (e.g. followed by
+      // the file size) — WhatsApp changed how the name is rendered.
+      if (/(?:^|\s)[\w][\w .\-()]*\.(?:csv|tsv|xlsx|xls)(?=\s|$)/i.test(text)) {
+        console.info('[Drag to Sheets] filename embedded in text:', JSON.stringify(text.slice(0, 120)));
+      }
     };
 
     // Pass 1: text leaves that display a supported filename.
