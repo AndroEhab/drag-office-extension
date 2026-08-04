@@ -20,7 +20,6 @@
     tabYieldEvery: 5,
     tabYieldMs: 75,
   };
-  const MAX_IMPORT_SIZE_BYTES = 50 * 1024 * 1024;
   const PREVIEW_SAMPLE_ROWS = 51;
   const EXCEL_METADATA_PREVIEW_NOTICE =
     'Excel metadata-sensitive transformations (Trim, Fix numbers, and Normalize headers) are not represented in this sample because trustworthy cell metadata is unavailable; they will be applied on upload.';
@@ -49,6 +48,8 @@
       this.primaryActionOperation = null;
       this.mergeSheetMetadataLoading = false;
       this.mergeSheetMetadataPromise = null;
+      this.docsLinkHistory = [];
+      this._filesListData = [];
       this.init();
     }
 
@@ -252,6 +253,12 @@
      * merge selection state.
      */
     getSelectedMergeSheet(item) {
+      if (item?.kind === 'reference') {
+        // Reference entries have no parsed bytes; data is fetched on demand
+        // and cached on the entry by ensureReferenceData().
+        return item.refData || null;
+      }
+
       const sheets = item?.parsed?.sheets;
       if (!Array.isArray(sheets) || sheets.length === 0) {
         if (item) item.selectedMergeSheetIndex = 0;
@@ -588,6 +595,9 @@
         this.showProgress(Math.round(((idx + 1) / pendingItems.length) * 100 * 0.3));
         await this.ensureParsedEntry(item, options, reason);
       });
+
+      // Never leave the loading status behind once the parses have finished.
+      this.setStatus(`${this.files.length} file(s) ready`, 'success');
     }
 
     async hydrateMergeSheetMetadata() {
@@ -684,6 +694,9 @@
       if (cachedPreview) {
         this.restorePreviewSummary(item, cachedPreview);
         return cachedPreview;
+      }
+      if (item?.kind === 'reference') {
+        return this.ensureReferencePreview(item, { merge });
       }
       if (merge && !item?.parsed && this.getStoredMergeSheetIndex(item) !== 0) {
         await this.ensureParsedEntry(item, { preserveFormatting: true }, 'merge preview');
@@ -1182,6 +1195,7 @@
     }
 
     async getMergedProcessedData(options = this.getCleaningOptions()) {
+      await this.ensureReferenceDataForFiles(this.files);
       const smartMapping = this.isSmartMappingActive();
       const raw = this.files.map((item) => this.getSelectedMergeInput(item));
       const selectedSheetKey = this.files
@@ -1255,6 +1269,13 @@
       this.cleanupResultsEmpty = document.getElementById('cleanup-results-empty');
       this.uploadBtn = document.getElementById('upload-btn');
       this.themeToggle = document.getElementById('theme-toggle');
+      this.filesBtn = document.getElementById('files-btn');
+      this.appView = document.getElementById('app-view');
+      this.filesView = document.getElementById('files-view');
+      this.filesBackBtn = document.getElementById('files-back-btn');
+      this.filesStatus = document.getElementById('files-status');
+      this.filesRefreshBtn = document.getElementById('files-refresh');
+      this.filesList = document.getElementById('files-list');
       this.settingsBtn = document.getElementById('settings-btn');
       this.cleaningOptions = document.getElementById('cleaning-options');
       this.previewSelect = document.getElementById('preview-select');
@@ -1270,6 +1291,10 @@
       this.urlInput = document.getElementById('url-input');
       this.urlFetchBtn = document.getElementById('url-fetch-btn');
       this.urlHint = document.querySelector('.url-hint');
+      this.docsLinkHistorySection = document.getElementById('docs-link-history');
+      this.docsLinkHistoryList = document.getElementById('docs-link-history-list');
+      this.filesClearBtn = document.getElementById('files-clear');
+      this.filesSearch = document.getElementById('files-search');
       this.smartMappingOption = document.getElementById('smart-mapping-option');
       this.smartMappingCheckbox = document.getElementById('opt-smart-mapping');
       this.mappingReview = document.getElementById('mapping-review');
@@ -1397,6 +1422,23 @@
         this.savePreferences();
       });
 
+      // All-files view (inside the side panel)
+      if (this.filesBtn) {
+        this.filesBtn.addEventListener('click', () => this.toggleFilesView());
+      }
+      if (this.filesBackBtn) {
+        this.filesBackBtn.addEventListener('click', () => this.closeFilesView());
+      }
+      if (this.filesRefreshBtn) {
+        this.filesRefreshBtn.addEventListener('click', () => this.loadFilesList());
+      }
+      if (this.filesClearBtn) {
+        this.filesClearBtn.addEventListener('click', () => this.clearDriveFiles());
+      }
+      if (this.filesSearch) {
+        this.filesSearch.addEventListener('input', () => this.renderFilesList());
+      }
+
       // Settings button toggles cleaning options
       this.settingsBtn.addEventListener('click', () => {
         const isOpen = !this.cleaningOptions.classList.contains('hidden');
@@ -1504,8 +1546,6 @@
       this.urlToggle.setAttribute('aria-expanded', String(open));
       if (open) {
         this.urlInput.focus();
-      } else {
-        this.currentFetchController?.abort();
       }
     }
 
@@ -1526,163 +1566,568 @@
     async importFromUrl() {
       const raw = this.urlInput.value.trim();
 
-      let url;
-      try {
-        url = new URL(raw);
-      } catch {
+      const parsed = this.parseDocsLink(raw);
+      if (!parsed) {
         this.urlInput.classList.add('url-input--error');
-        this.showUrlTooltip('Enter a valid URL');
-        return;
-      }
-      if (url.protocol !== 'https:') {
-        this.urlInput.classList.add('url-input--error');
-        this.showUrlTooltip('Only HTTPS URLs are supported');
+        this.showUrlTooltip('Paste a Google Sheets link, e.g. https://docs.google.com/spreadsheets/d/…');
         return;
       }
 
-      const originPattern = `${url.protocol}//${url.hostname}/*`;
-      let hasPermission;
-      try {
-        hasPermission = await chrome.permissions.contains({ origins: [originPattern] });
-      } catch {
-        hasPermission = false;
-      }
-      if (!hasPermission) {
-        let granted;
-        try {
-          granted = await chrome.permissions.request({ origins: [originPattern] });
-        } catch {
-          granted = false;
-        }
-        if (!granted) {
-          this.urlInput.classList.add('url-input--error');
-          this.setStatus(`Permission denied for ${url.hostname}. Cannot fetch from this origin.`, 'warning');
-          return;
-        }
+      const refKey = `ref:${parsed.id}`;
+      if (this.fileIdentityKeys.has(refKey)) {
+        this.urlInput.classList.add('url-input--error');
+        this.showUrlTooltip('This Google Sheet is already in your list');
+        return;
       }
 
       this.urlFetchBtn.disabled = true;
-      this.setStatus(`Fetching ${url.hostname}…`, 'loading');
-
-      const controller = new AbortController();
-      this.currentFetchController = controller;
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      this.setStatus('Checking Google Sheet access…', 'loading');
 
       try {
-        const response = await fetch(url.toString(), { signal: controller.signal });
-
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status} ${response.statusText}`);
-        }
-
-        const contentLength = response.headers.get('content-length');
-        if (contentLength !== null) {
-          const declaredSize = parseInt(contentLength, 10);
-          if (!Number.isNaN(declaredSize) && declaredSize > MAX_IMPORT_SIZE_BYTES) {
-            controller.abort();
-            response.body?.cancel().catch(() => {});
-            throw new Error(
-              `File too large (${this.formatBytes(declaredSize)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
-            );
-          }
-        }
-
-        const chunks = [];
-        let totalBytes = 0;
-        let sizeExceeded = false;
-        const reader = response.body.getReader();
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            totalBytes += value.byteLength;
-            if (totalBytes > MAX_IMPORT_SIZE_BYTES) {
-              sizeExceeded = true;
-              break;
-            }
-            chunks.push(value);
-          }
-        } finally {
-          reader.cancel().catch(() => {});
-        }
-
-        if (sizeExceeded) {
-          throw new Error(
-            `File too large (${this.formatBytes(totalBytes)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
-          );
-        }
-
-        const disposition = response.headers.get('content-disposition') || '';
-        const contentType = response.headers.get('content-type') || '';
-        const fileName = this.resolveFileName(raw, disposition, contentType);
-
-        const ext = fileName.split('.').pop().toLowerCase();
-        if (!Parser.isSupported(fileName)) {
-          throw new Error(
-            `Cannot import: unrecognised file type (.${ext}). Supported: csv, tsv, xlsx, xls`
-          );
-        }
-        if ((ext === 'xlsx' || ext === 'xls') && !Parser.isExcelSupported()) {
-          throw new Error('Excel support not installed. See README for setup.');
-        }
-
-        const blob = new Blob(chunks, { type: contentType || undefined });
-        const file = new File([blob], fileName, { type: blob.type });
-
-        await this.handleFiles([file]);
-
+        const entry = await this.addReferenceEntry(parsed.id, parsed.url);
+        this.setStatus(`Added "${entry.name}" — linked to your Google Sheet`, 'success');
         this.urlInput.value = '';
         this.toggleUrlBar(false);
       } catch (err) {
         this.urlInput.classList.add('url-input--error');
-        if (err.name === 'AbortError') {
-          this.setStatus('Import cancelled or timed out', 'error');
-        } else {
-          this.setStatus(`Import failed: ${err.message}`, 'error');
-        }
+        this.setStatus(this.referenceAccessErrorMessage(err), 'error');
       } finally {
-        clearTimeout(timeoutId);
-        this.currentFetchController = null;
         this.urlFetchBtn.disabled = false;
       }
     }
 
     /**
-     * Derive a filename from URL path, Content-Disposition, or Content-Type.
-     * @param {string} rawUrl
-     * @param {string} disposition  Content-Disposition header value
-     * @param {string} contentType  Content-Type header value
-     * @returns {string}
+     * Validate access to a spreadsheet and add it to the app as a reference
+     * (same instance — never a copy). Returns the new entry, or null when the
+     * spreadsheet is already in the file list.
      */
-    resolveFileName(rawUrl, disposition, contentType) {
-      // 1. Content-Disposition: attachment; filename="data.csv"
-      const cdMatch = disposition.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;\r\n"']+)['"]?/i);
-      if (cdMatch && cdMatch[1]) {
-        return decodeURIComponent(cdMatch[1].trim());
-      }
+    async addReferenceEntry(refId, refUrl) {
+      const refKey = `ref:${refId}`;
+      if (this.fileIdentityKeys.has(refKey)) return null;
 
-      // 2. Last path segment of the URL
+      const info = await GoogleAPI.getSpreadsheetInfo(refId);
+      const entry = this.createReferenceEntry(refId, refUrl, info);
+
+      // Accurate used-range stats for the first sheet come from a values read;
+      // remaining sheets use grid properties.
       try {
-        const pathname = new URL(rawUrl).pathname;
-        const segment = pathname.split('/').pop();
-        if (segment && segment.includes('.')) {
-          return decodeURIComponent(segment);
+        const firstSheet = entry.sheetMetadata[0];
+        if (firstSheet) {
+          const values = await GoogleAPI.getSpreadsheetValues(
+            entry.refId,
+            this.escapeSheetNameForRange(firstSheet.name)
+          );
+          const rows = (values && values.values) || [];
+          firstSheet.rowCount = rows.length;
+          firstSheet.colCount = rows.reduce((max, r) => Math.max(max, r.length), 0);
+          entry.stats = {
+            sheetCount: 1,
+            rowCount: rows.length,
+            dataRowCount: Math.max(rows.length - 1, 0),
+            colCount: firstSheet.colCount,
+            cellCount: 0,
+            styledCellCount: 0,
+          };
         }
-      } catch { /* ignore */ }
-
-      // 3. Infer from Content-Type
-      const ctMap = {
-        'text/csv': 'import.csv',
-        'text/tab-separated-values': 'import.tsv',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'import.xlsx',
-        'application/vnd.ms-excel': 'import.xls',
-      };
-      for (const [mime, name] of Object.entries(ctMap)) {
-        if (contentType.includes(mime)) return name;
+      } catch (_) {
+        // Stats are best-effort; preview/merge will surface access errors.
       }
 
-      return 'import.csv';
+      this.fileIdentityKeys.add(refKey);
+      this.files.push(entry);
+      this.recordDocsLinkImport(entry);
+      this.markFilesChanged();
+      this.renderFileList();
+      this.updateUI();
+      this.saveFilesSession();
+      return entry;
+    }
+
+    // ---- All-Files View ----
+
+    async toggleFilesView() {
+      if (!this.filesView) return;
+      const isOpen = !this.filesView.classList.contains('hidden');
+      if (isOpen) {
+        this.closeFilesView();
+        return;
+      }
+      this.filesView.classList.remove('hidden');
+      if (this.appView) this.appView.classList.add('hidden');
+      this.filesBtn.classList.add('active');
+      await this.loadFilesList();
+    }
+
+    closeFilesView() {
+      if (!this.filesView) return;
+      this.filesView.classList.add('hidden');
+      if (this.appView) this.appView.classList.remove('hidden');
+      this.filesBtn.classList.remove('active');
+      if (this.filesSearch) this.filesSearch.value = '';
+      this.resetFilesClearButton();
+    }
+
+    formatFileDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      // Deterministic format ("Jul 1, 2026") — locale-dependent abbreviations
+      // (e.g. "ago" for August in Spanish) are ambiguous for users.
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+    }
+
+    async loadFilesList() {
+      const list = this.filesList;
+      if (!list) return;
+      this.resetFilesClearButton();
+      list.innerHTML = '';
+      if (this.filesRefreshBtn) this.filesRefreshBtn.disabled = true;
+      this.filesStatus.textContent = 'Loading your files\u2026';
+      this.filesStatus.classList.remove('files-status--error');
+
+      try {
+        const files = await GoogleAPI.listAppFiles();
+        this._filesListData = files || [];
+
+        if (this._filesListData.length === 0) {
+          this.filesStatus.textContent =
+            'No files yet. Upload a spreadsheet or import a Google Docs link to create one.';
+          if (this.filesClearBtn) this.filesClearBtn.disabled = true;
+          return;
+        }
+
+        this.renderFilesList();
+      } catch (err) {
+        this._filesListData = [];
+        this.filesStatus.textContent = `Could not load your files: ${err.message}`;
+        this.filesStatus.classList.add('files-status--error');
+      } finally {
+        if (this.filesRefreshBtn) this.filesRefreshBtn.disabled = false;
+      }
+    }
+
+    /**
+     * Render the files list, filtered by the current search query. The query
+     * matches the filename case-insensitively.
+     */
+    renderFilesList() {
+      const list = this.filesList;
+      if (!list) return;
+      list.innerHTML = '';
+
+      const all = this._filesListData || [];
+      const query = this.filesSearch ? this.filesSearch.value.trim().toLowerCase() : '';
+      const files = query
+        ? all.filter((file) => String(file.name || '').toLowerCase().includes(query))
+        : all;
+
+      if (all.length > 0 && files.length === 0) {
+        this.filesStatus.textContent = 'No files match your search';
+        if (this.filesClearBtn) this.filesClearBtn.disabled = true;
+        return;
+      }
+
+      this.filesStatus.textContent = query && files.length < all.length
+        ? `${files.length} of ${all.length} file(s)`
+        : `${all.length} file(s) accessible to this app`;
+      if (this.filesClearBtn) this.filesClearBtn.disabled = files.length === 0;
+
+      for (const file of files) {
+        const li = document.createElement('li');
+        li.className = 'files-item';
+
+        const a = document.createElement('a');
+        a.className = 'files-item-link';
+        a.href = file.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+
+        const name = document.createElement('span');
+        name.className = 'files-item-name';
+        name.textContent = file.name;
+
+        const date = document.createElement('span');
+        date.className = 'files-item-date';
+        date.textContent = this.formatFileDate(file.addedAt);
+
+        a.appendChild(name);
+        a.appendChild(date);
+
+        const loadBtn = document.createElement('button');
+        loadBtn.type = 'button';
+        loadBtn.className = 'btn-text files-load-btn';
+        loadBtn.textContent = 'Load';
+        loadBtn.title = `Add ${file.name} to the app`;
+        loadBtn.setAttribute('aria-label', `Load ${file.name} in the app`);
+        loadBtn.addEventListener('click', () => this.loadFileIntoApp(file));
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'file-action-btn remove-btn files-remove-btn';
+        removeBtn.innerHTML = this.iconMarkup('x');
+        removeBtn.title = `Remove ${file.name} from your files (moves it to the trash)`;
+        removeBtn.setAttribute('aria-label', `Remove ${file.name}`);
+        removeBtn.dataset.fileId = file.id;
+        removeBtn.addEventListener('click', () => this.removeDriveFile(file));
+
+        li.appendChild(a);
+        li.appendChild(loadBtn);
+        li.appendChild(removeBtn);
+        list.appendChild(li);
+      }
+      this.renderIcons(list);
+    }
+
+    /**
+     * Add a spreadsheet from the files view to the app as a reference, so it
+     * can be previewed, merged, and merged into (same instance).
+     */
+    async loadFileIntoApp(file) {
+      this.setStatus(`Loading "${file.name}" into the app…`, 'loading');
+      try {
+        const entry = await this.addReferenceEntry(file.id, file.url);
+        if (entry) {
+          this.setStatus(`Loaded "${entry.name}" into the app — it is now in your file list`, 'success');
+        } else {
+          this.setStatus(`"${file.name}" is already in your file list`, 'info');
+        }
+      } catch (err) {
+        this.setStatus(this.referenceAccessErrorMessage(err), 'error');
+      }
+    }
+
+    /**
+     * Remove a spreadsheet from the files list by moving it to the trash.
+     * Also drops any matching reference from the app's file list so it cannot
+     * linger as a broken link.
+     */
+    async removeDriveFile(file) {
+      try {
+        await GoogleAPI.trashAppFile(file.id);
+        this.removeReferenceFromApp(file.id);
+        this.setStatus(`Removed "${file.name}" — it is now in your Google Drive trash`, 'success');
+      } catch (err) {
+        this.setStatus(`Could not remove "${file.name}": ${err.message}`, 'error');
+        return;
+      }
+      await this.loadFilesList();
+    }
+
+    /**
+     * Trash every file the app has access to, shown in the files list.
+     * Two-step confirmation: the first click turns the button into "Confirm",
+     * the second click performs the removal.
+     */
+    async clearDriveFiles() {
+      const files = this._filesListData || [];
+      if (files.length === 0) return;
+      const count = files.length;
+
+      if (!this._filesClearArmed) {
+        this._filesClearArmed = true;
+        this.filesClearBtn.textContent = 'Confirm';
+        this.filesClearBtn.classList.add('files-clear-btn--armed');
+        this.filesClearBtn.setAttribute('aria-label', 'Confirm removing all files');
+        return;
+      }
+
+      this._filesClearArmed = false;
+      this.setStatus(`Removing ${count} file(s)…`, 'loading');
+      if (this.filesClearBtn) this.filesClearBtn.disabled = true;
+      try {
+        for (const file of files) {
+          await GoogleAPI.trashAppFile(file.id);
+          this.removeReferenceFromApp(file.id);
+        }
+        this.setStatus(`${count} file(s) removed — they are now in your Google Drive trash`, 'success');
+      } catch (err) {
+        this.setStatus(`Could not remove all files: ${err.message}`, 'error');
+      }
+      await this.loadFilesList();
+    }
+
+    /**
+     * Reset the "Clear all" button to its unarmed state.
+     */
+    resetFilesClearButton() {
+      this._filesClearArmed = false;
+      if (this.filesClearBtn) {
+        this.filesClearBtn.textContent = 'Clear all';
+        this.filesClearBtn.classList.remove('files-clear-btn--armed');
+        this.filesClearBtn.setAttribute('aria-label', 'Remove all files from your files (moves them to the trash)');
+      }
+    }
+
+    removeReferenceFromApp(refId) {
+      const index = this.files.findIndex(
+        (item) => item.kind === 'reference' && item.refId === refId
+      );
+      if (index === -1) return;
+      this.files.splice(index, 1);
+      this.fileIdentityKeys.delete(`ref:${refId}`);
+      this.markFilesChanged();
+      this.renderFileList();
+      this.updateUI();
+      this.saveFilesSession();
+    }
+
+    /**
+     * Remember the most recently imported Google Docs links (max 3, newest
+     * first, deduplicated by spreadsheet). Persisted in chrome.storage.local
+     * so the history survives browser and device restarts.
+     */    recordDocsLinkImport(entry) {
+      const next = [{
+        url: entry.refUrl,
+        name: entry.name,
+      }];
+      for (const item of this.docsLinkHistory || []) {
+        if (item.url === entry.refUrl) continue;
+        next.push(item);
+      }
+      this.docsLinkHistory = next.slice(0, 3);
+      this.saveDocsLinkHistory();
+      this.renderDocsLinkHistory();
+    }
+
+    saveDocsLinkHistory() {
+      chrome.storage.local
+        .set({ docsLinkHistory: this.docsLinkHistory })
+        .catch((err) => this._log('warn', 'Drag to Sheets: docs link history save failed:', err.message));
+    }
+
+    renderDocsLinkHistory() {
+      const list = this.docsLinkHistoryList;
+      if (!list) return;
+      list.innerHTML = '';
+      const history = this.docsLinkHistory || [];
+      if (this.docsLinkHistorySection) {
+        this.docsLinkHistorySection.classList.toggle('hidden', history.length === 0);
+      }
+      for (const item of history) {
+        const li = document.createElement('li');
+        li.className = 'docs-link-history-item';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'docs-link-history-btn';
+        btn.title = item.url;
+
+        const name = document.createElement('span');
+        name.className = 'docs-link-history-name';
+        name.textContent = item.name || item.url;
+        btn.appendChild(name);
+
+        const host = document.createElement('span');
+        host.className = 'docs-link-history-host';
+        try {
+          host.textContent = new URL(item.url).hostname;
+        } catch (_) {
+          host.textContent = '';
+        }
+        btn.appendChild(host);
+
+        btn.addEventListener('click', () => {
+          this.urlInput.value = item.url;
+          void this.importFromUrl();
+        });
+
+        li.appendChild(btn);
+        list.appendChild(li);
+      }
+    }
+
+    /**
+     * Parse a Google Docs/Drive link into a spreadsheet reference.
+     * Returns { id, url } or null when the link is not a spreadsheet link.
+     */
+    parseDocsLink(raw) {
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== 'https:') return null;
+
+      const host = url.hostname.toLowerCase();
+      let id = null;
+
+      if (host === 'docs.google.com' || host.endsWith('.docs.google.com')) {
+        const m = url.pathname.match(/^\/spreadsheets\/d\/([^/]+)/);
+        if (m) id = m[1];
+      } else if (host === 'drive.google.com' || host.endsWith('.drive.google.com')) {
+        const fileMatch = url.pathname.match(/^\/file\/d\/([^/]+)/);
+        if (fileMatch) {
+          id = fileMatch[1];
+        } else {
+          const queryId = url.searchParams.get('id');
+          if (queryId) id = queryId;
+        }
+      }
+
+      if (!id) return null;
+      return {
+        id,
+        url: `https://docs.google.com/spreadsheets/d/${id}/edit`,
+      };
+    }
+
+    /**
+     * Build a file-list entry that references an existing Google Sheet.
+     * The entry has no bytes: opening always opens the same spreadsheet
+     * instance and merging writes back into it.
+     */
+    createReferenceEntry(refId, refUrl, info) {
+      const sheets = Array.isArray(info?.sheets)
+        ? info.sheets.map((s) => ({
+          name: s.properties?.title || 'Sheet 1',
+          rowCount: Number.isFinite(s.properties?.gridProperties?.rowCount)
+            ? s.properties.gridProperties.rowCount
+            : null,
+          colCount: Number.isFinite(s.properties?.gridProperties?.columnCount)
+            ? s.properties.gridProperties.columnCount
+            : null,
+        }))
+        : [];
+
+      return {
+        kind: 'reference',
+        refId,
+        refUrl,
+        name: info?.properties?.title || 'Google Sheet',
+        ext: 'gsheet',
+        size: 0,
+        stats: null,
+        summaryStats: null,
+        sheetMetadata: sheets,
+        selectedMergeSheetIndex: 0,
+        refData: null,
+        identityKey: `ref:${refId}`,
+        contentFingerprint: null,
+        lazy: true,
+        file: null,
+        parsed: null,
+        fileHandle: null,
+        handleId: null,
+      };
+    }
+
+    /**
+     * Human-readable explanation for reference access failures. The app holds
+     * the per-file Google scope, so it can only reach sheets it created itself.
+     */
+    referenceAccessErrorMessage(err) {
+      const detail = err?.message || '';
+      if (/403|permission|insufficient/i.test(detail) || /404/.test(detail)) {
+        return 'Drag to Sheets can only open Google Sheets it created itself (files uploaded through this extension). This file was not created by the app, so it cannot be previewed, merged, or edited.';
+      }
+      return `Cannot access this Google Sheet: ${detail}`;
+    }
+
+    escapeSheetNameForRange(name) {
+      return "'" + String(name || 'Sheet1').replace(/'/g, "''") + "'";
+    }
+
+    colToLetter(i) {
+      let s = '';
+      let n = i + 1;
+      while (n > 0) {
+        n--;
+        s = String.fromCharCode(65 + (n % 26)) + s;
+        n = Math.floor(n / 26);
+      }
+      return s;
+    }
+
+    /**
+     * Fetch the full values of the selected worksheet of a referenced sheet
+     * and cache them on the entry so merge/mapping can read synchronously.
+     */
+    async ensureReferenceData(item) {
+      if (item?.kind !== 'reference') return;
+      if (item.refData) return;
+
+      const metadata = this.getMergeSheetMetadata(item);
+      const selectedIndex = this.normalizeMergeSheetIndex(item, metadata.length);
+      const sheetName = (metadata[selectedIndex] && metadata[selectedIndex].name) || 'Sheet1';
+
+      let values;
+      try {
+        values = await GoogleAPI.getSpreadsheetValues(item.refId, this.escapeSheetNameForRange(sheetName));
+      } catch (err) {
+        throw new Error(this.referenceAccessErrorMessage(err));
+      }
+
+      const data = (values && values.values) || [];
+      item.refData = { name: sheetName, data, cellMeta: null };
+      item.stats = {
+        sheetCount: 1,
+        rowCount: data.length,
+        dataRowCount: Math.max(data.length - 1, 0),
+        colCount: data.reduce((max, r) => Math.max(max, r.length), 0),
+        cellCount: 0,
+        styledCellCount: 0,
+      };
+    }
+
+    async ensureReferenceDataForFiles(items) {
+      const pending = (items || []).filter((item) => item?.kind === 'reference' && !item.refData);
+      if (pending.length === 0) return;
+      await this.mapWithConcurrency(pending, 3, async (item) => {
+        this.setStatus(`Reading ${item.name}…`, 'loading');
+        await this.ensureReferenceData(item);
+      });
+      // Never leave the loading status behind once the reads have finished.
+      this.setStatus(`${this.files.length} file(s) ready`, 'success');
+    }
+
+    /**
+     * Preview a referenced spreadsheet by fetching only a bounded sample of
+     * the selected worksheet (the app never downloads the whole file).
+     */
+    async ensureReferencePreview(item, { merge = false } = {}) {
+      const cacheKey = this.getPreviewCacheKey(item, merge);
+      const cachedPreview = this.getCachedPreview(item, cacheKey);
+      if (cachedPreview) {
+        this.restorePreviewSummary(item, cachedPreview);
+        return cachedPreview;
+      }
+
+      const metadata = this.getMergeSheetMetadata(item);
+      const selectedIndex = this.normalizeMergeSheetIndex(item, metadata.length);
+      const sheet = metadata[selectedIndex] || { name: 'Sheet1', rowCount: null, colCount: null };
+      const gridRows = Math.max(sheet.rowCount || PREVIEW_SAMPLE_ROWS, 1);
+      const gridCols = Math.max(sheet.colCount || 20, 1);
+      const rows = Math.min(PREVIEW_SAMPLE_ROWS, gridRows);
+      const range = `${this.escapeSheetNameForRange(sheet.name)}!A1:${this.colToLetter(gridCols - 1)}${rows}`;
+
+      let values;
+      try {
+        values = await GoogleAPI.getSpreadsheetValues(item.refId, range);
+      } catch (err) {
+        throw new Error(this.referenceAccessErrorMessage(err));
+      }
+
+      const data = ((values && values.values) || []).slice(0, PREVIEW_SAMPLE_ROWS);
+      const preview = {
+        sheets: [{
+          name: sheet.name,
+          data,
+          cellMeta: null,
+        }],
+        previewMeta: {
+          rowCount: gridRows,
+          dataRowCount: Math.max(gridRows - 1, 0),
+          colCount: gridCols,
+          sheetCount: 1,
+          sampled: data.length < gridRows,
+          sampleRows: data.length,
+          fileSize: 0,
+          metadataTrusted: true,
+        },
+      };
+      return this.cachePreview(item, cacheKey, preview);
     }
 
     // ---- Session Persistence ----
@@ -1702,6 +2147,9 @@
       }
 
       const serializedFiles = this.files.map((item) => ({
+        kind: item.kind === 'reference' ? 'reference' : null,
+        refId: item.refId || null,
+        refUrl: item.refUrl || null,
         name: item.name,
         ext: item.ext,
         size: this.getFileSize(item),
@@ -1718,6 +2166,9 @@
           : null,
       }));
       const indexedDbFiles = this.files.map((item) => ({
+        kind: item.kind === 'reference' ? 'reference' : null,
+        refId: item.refId || null,
+        refUrl: item.refUrl || null,
         name: item.name,
         ext: item.ext,
         size: this.getFileSize(item),
@@ -1797,11 +2248,14 @@
     async restoreSession() {
       this._prunedDuringRestore = [];
       try {
-        const [{ files: storedFiles, sessionSummary }, { prefs }] = await Promise.all([
+        const [{ files: storedFiles, sessionSummary }, { prefs, docsLinkHistory }] = await Promise.all([
           chrome.storage.session.get(['files', 'sessionSummary']),
-          chrome.storage.local.get('prefs'),
+          chrome.storage.local.get(['prefs', 'docsLinkHistory']),
         ]);
         this.sessionSummary = sessionSummary || null;
+        this.docsLinkHistory = Array.isArray(docsLinkHistory)
+          ? docsLinkHistory.slice(0, 3)
+          : [];
 
         let restoredFiles = storedFiles;
         if ((!Array.isArray(restoredFiles) || restoredFiles.length === 0) && sessionSummary?.persisted === 'indexeddb') {
@@ -1812,6 +2266,9 @@
         // Restore files
         if (Array.isArray(restoredFiles) && restoredFiles.length > 0) {
           const mapped = restoredFiles.map((item) => ({
+            kind: item.kind === 'reference' ? 'reference' : null,
+            refId: item.refId || null,
+            refUrl: item.refUrl || null,
             file: item.file || null,
             parsed: item.parsed || (Array.isArray(item.sheets) ? { sheets: item.sheets } : null),
             name: item.name,
@@ -1832,6 +2289,15 @@
           const prunedNames = [];
 
           for (const entry of mapped) {
+            if (entry.kind === 'reference') {
+              if (entry.refId && entry.refUrl) {
+                validEntries.push(entry);
+                continue;
+              }
+              prunedNames.push(entry.name);
+              continue;
+            }
+
             if (entry.parsed) {
               this.getSelectedMergeSheet(entry);
               const ext = entry.ext || '';
@@ -1967,6 +2433,7 @@
 
       this.renderFileList();
       this.updateUI();
+      this.renderDocsLinkHistory();
 
       const pruned = this._prunedDuringRestore || [];
       if (this.files.length > 0) {
@@ -2205,6 +2672,7 @@
       this.files.splice(newIndex, 0, item);
       this.markFilesChanged();
       this.renderFileList();
+      void this.updateCustomMappingVisibility();
       this.schedulePreviewRefresh();
       this.saveFilesSession();
     }
@@ -2216,6 +2684,7 @@
       this.rebuildFingerprints();
       this.markFilesChanged();
       this.renderFileList();
+      void this.updateCustomMappingVisibility();
       // Adjust select value after removal
       if (this.files.length > 0) {
         this.previewSelect.value = Math.min(currentIdx, this.files.length - 1);
@@ -2265,6 +2734,7 @@
 
       item.selectedMergeSheetIndex = clampedIndex;
       this.invalidatePreviewCache(item, 'merge');
+      item.refData = null;
       item.summaryStats = null;
       this.markFilesChanged();
       this.hidePreview();
@@ -2286,11 +2756,13 @@
         const rows = stats?.rowCount || 0;
         const cols = stats?.colCount || 0;
         const sheetCount = stats?.sheetCount || item.parsed?.sheets?.length || 0;
-        const metaText = item.parsed
-          ? `${rows} rows &times; ${cols} cols${
-            sheetCount > 1 ? ` &middot; ${sheetCount} sheets` : ''
-          }`
-          : `Ready on demand${item.size ? ` &middot; ${this.formatBytes(item.size)}` : ''}`;
+        const metaText = item.kind === 'reference'
+          ? `Linked Google Sheet${rows ? ` &middot; ${rows} rows &times; ${cols} cols` : ''}`
+          : item.parsed
+            ? `${rows} rows &times; ${cols} cols${
+              sheetCount > 1 ? ` &middot; ${sheetCount} sheets` : ''
+            }`
+            : `Ready on demand${item.size ? ` &middot; ${this.formatBytes(item.size)}` : ''}`;
 
         const info = document.createElement('div');
         info.className = 'file-info';
@@ -2300,12 +2772,13 @@
             <i data-lucide="${this.fileIcon(item.ext)}" class="app-icon" aria-hidden="true"></i>
           </span>
           <div class="file-details">
-            <span class="file-name">${this.escapeHtml(item.name)}${isMaster ? ' <span class="master-badge">Master</span>' : ''}</span>
+            <span class="file-name">${isMaster ? '<span class="master-badge">Master</span> ' : ''}${this.escapeHtml(item.name)}</span>
             <span class="file-meta">${metaText}</span>
           </div>
         `;
 
-        const supportsWorksheetSelection = item.ext === 'xlsx' || item.ext === 'xls';
+        const supportsWorksheetSelection =
+          item.ext === 'xlsx' || item.ext === 'xls' || item.kind === 'reference';
         const sheetMetadata = isMergeMode && supportsWorksheetSelection
           ? this.getMergeSheetMetadata(item)
           : null;
@@ -2339,8 +2812,15 @@
         const openBtn = document.createElement('button');
         openBtn.className = 'file-action-btn open-file-btn';
         openBtn.innerHTML = this.iconMarkup('square-arrow-out-up-right');
-        openBtn.title = 'Open this file in Sheets';
-        openBtn.setAttribute('aria-label', `Open ${item.name} in Sheets`);
+        openBtn.title = item.kind === 'reference'
+          ? 'Open this Google Sheet (same instance)'
+          : 'Open this file in Sheets';
+        openBtn.setAttribute(
+          'aria-label',
+          item.kind === 'reference'
+            ? `Open ${item.name} in Google Sheets (same instance)`
+            : `Open ${item.name} in Sheets`
+        );
         openBtn.disabled = this.uploading;
         openBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -2557,6 +3037,7 @@
         tsv: 'file-chart-column',
         xlsx: 'file-spreadsheet',
         xls: 'file-spreadsheet',
+        gsheet: 'file-spreadsheet',
       }[ext] || 'file';
     }
 
@@ -2739,7 +3220,11 @@
         }
 
         try {
-          await this.ensureEntriesParsed(this.files, { preserveFormatting: true }, 'merge preview');
+          await this.ensureEntriesParsed(
+            this.files.filter((item) => item?.kind !== 'reference'),
+            { preserveFormatting: true },
+            'merge preview'
+          );
         } catch (error) {
           if (!this.isPreviewTaskCurrent(previewTaskId)) return;
           this.renderPreviewNotice(error.message);
@@ -3092,6 +3577,7 @@
     }
 
     async buildCustomMappingContextForCurrentFiles() {
+      await this.ensureReferenceDataForFiles(this.files);
       const rawFiles = [];
       const fileNames = this.files.map((item) => item.name);
 
@@ -3287,10 +3773,9 @@
         const row = document.createElement('div');
         row.className = 'custom-mapping-row';
 
-        const fromSelect = this.buildGroupedHeaderSelect(
-          resolvedContext.nonMasterGroups,
-          mapping.from,
-          'Source\u2026'
+        const { field: fromField, select: fromSelect } = this.buildMappingField(
+          'Source',
+          this.buildGroupedHeaderSelect(resolvedContext.nonMasterGroups, mapping.from)
         );
         fromSelect.addEventListener('change', () =>
           this.updateCustomMapping(index, 'from', fromSelect.value)
@@ -3303,15 +3788,15 @@
         const allowedTargets = mapping.from
           ? (resolvedContext.availableTargetsBySource.get(mapping.from) || [])
           : resolvedContext.defaultTargetHeaders;
-        const toSelect = this.buildMasterHeaderSelect(
-          resolvedContext.masterGroup,
-          mapping.to,
-          'Master column\u2026',
-          allowedTargets
+        const { field: toField, select: toSelect } = this.buildMappingField(
+          'Master',
+          this.buildMasterHeaderSelect(resolvedContext.masterGroup, mapping.to, allowedTargets)
         );
-        toSelect.addEventListener('change', () =>
-          this.updateCustomMapping(index, 'to', toSelect.value)
-        );
+        toSelect.addEventListener('change', () => {
+          const current = this.customMappings[index];
+          if (current && !current.from) current.from = fromSelect.value;
+          this.updateCustomMapping(index, 'to', toSelect.value);
+        });
 
         const removeBtn = document.createElement('button');
         removeBtn.className = 'file-action-btn remove-btn';
@@ -3320,9 +3805,9 @@
         removeBtn.setAttribute('aria-label', 'Remove mapping');
         removeBtn.addEventListener('click', () => this.removeCustomMapping(index));
 
-        row.appendChild(fromSelect);
+        row.appendChild(fromField);
         row.appendChild(arrow);
-        row.appendChild(toSelect);
+        row.appendChild(toField);
         row.appendChild(removeBtn);
         this.customMappingList.appendChild(row);
       });
@@ -3330,14 +3815,20 @@
       this.renderIcons(this.customMappingList);
     }
 
-    buildGroupedHeaderSelect(groups, selectedValue, placeholder) {
+    buildMappingField(labelText, select) {
+      const field = document.createElement('label');
+      field.className = 'custom-mapping-field';
+      const label = document.createElement('span');
+      label.className = 'custom-mapping-label';
+      label.textContent = labelText;
+      field.appendChild(label);
+      field.appendChild(select);
+      return { field, select };
+    }
+
+    buildGroupedHeaderSelect(groups, selectedValue) {
       const select = document.createElement('select');
       select.className = 'custom-mapping-select';
-
-      const placeholderOpt = document.createElement('option');
-      placeholderOpt.value = '';
-      placeholderOpt.textContent = placeholder;
-      select.appendChild(placeholderOpt);
 
       for (const group of groups) {
         if (!group.headers || group.headers.length === 0) continue;
@@ -3356,14 +3847,9 @@
       return select;
     }
 
-    buildMasterHeaderSelect(masterGroup, selectedValue, placeholder, allowedHeaders) {
+    buildMasterHeaderSelect(masterGroup, selectedValue, allowedHeaders) {
       const select = document.createElement('select');
       select.className = 'custom-mapping-select';
-
-      const placeholderOpt = document.createElement('option');
-      placeholderOpt.value = '';
-      placeholderOpt.textContent = placeholder;
-      select.appendChild(placeholderOpt);
 
       const allowed = new Set(allowedHeaders || masterGroup.headers || []);
       for (const h of (masterGroup.headers || [])) {
@@ -3598,11 +4084,19 @@
         let releasedParsedEntries = false;
 
         if (mode === 'merge' && this.files.length > 1) {
-          await this.ensureEntriesParsed(this.files, { preserveFormatting: true }, 'merge upload');
+          const masterRef = this.files[0]?.kind === 'reference' ? this.files[0] : null;
+          await this.ensureReferenceDataForFiles(this.files);
+          await this.ensureEntriesParsed(
+            this.files.filter((item) => item?.kind !== 'reference'),
+            { preserveFormatting: true },
+            'merge upload'
+          );
           this.showProgress(5);
 
           // Merge mode
-          const title = `Merged — ${new Date().toLocaleDateString()}`;
+          const title = masterRef
+            ? masterRef.name
+            : `Merged — ${new Date().toLocaleDateString()}`;
 
           // Check which Excel files have raw data for formatting preservation
           const excelWithRaw = this.files.filter(
@@ -3688,14 +4182,25 @@
               formattingBlocks.push({ startRow: blockStart, rows: blockRows });
             }
 
-            // Step 3: Create spreadsheet with raw merged data
-            this.setStatus('Creating spreadsheet…', 'loading');
+            // Step 3: Write into the referenced spreadsheet, or create a new one
             this.showProgress(30);
-            const result = await GoogleAPI.createSpreadsheet(title, [{
-              name: 'Merged',
-              data: mergedData,
-              cellMeta: mergedMeta,
-            }], apiContext);
+            if (masterRef) {
+              this.setStatus(`Merging into ${masterRef.name}…`, 'loading');
+              await GoogleAPI.overwriteSpreadsheetWithTypedData(
+                masterRef.refId,
+                { name: 'Merged', data: mergedData, cellMeta: mergedMeta },
+                apiContext
+              );
+            } else {
+              this.setStatus('Creating spreadsheet…', 'loading');
+            }
+            const result = masterRef
+              ? { id: masterRef.refId, url: masterRef.refUrl, reference: true }
+              : await GoogleAPI.createSpreadsheet(title, [{
+                name: 'Merged',
+                data: mergedData,
+                cellMeta: mergedMeta,
+              }], apiContext);
 
             // Step 4: Apply merged formatting
             if (formattingBlocks.length > 0) {
@@ -3725,11 +4230,21 @@
             this.showProgress(15);
             const processed = await this.getProcessedData();
             const mergedSheets = processed[0].sheets;
-            this.setStatus(`Creating "${title}" in Google Sheets…`, 'loading');
             this.showProgress(50);
-            const result = await GoogleAPI.createSpreadsheet(title, mergedSheets, apiContext);
-            this.showProgress(90);
-            results.push(result);
+            if (masterRef) {
+              this.setStatus(`Merging into ${masterRef.name}…`, 'loading');
+              await GoogleAPI.overwriteSpreadsheetWithTypedData(
+                masterRef.refId,
+                mergedSheets[0] || { name: 'Merged', data: [] },
+                apiContext
+              );
+              results.push({ id: masterRef.refId, url: masterRef.refUrl, reference: true });
+            } else {
+              this.setStatus(`Creating "${title}" in Google Sheets…`, 'loading');
+              const result = await GoogleAPI.createSpreadsheet(title, mergedSheets, apiContext);
+              this.showProgress(90);
+              results.push(result);
+            }
           }
           this.showProgress(100);
         } else {
@@ -3737,10 +4252,18 @@
           for (let i = 0; i < this.files.length; i++) {
             const fileBase = (i / this.files.length) * 100;
             const fileSlice = 100 / this.files.length;
-            this.setStatus(`Creating "${this.files[i].name.replace(/\.[^.]+$/, '') || `Sheet ${i + 1}`}" in Google Sheets…`, 'loading');
+            const item = this.files[i];
+
+            // Referenced sheets are not re-uploaded — open the same instance.
+            if (item.kind === 'reference') {
+              results.push({ id: item.refId, url: item.refUrl, reference: true });
+              continue;
+            }
+
+            this.setStatus(`Creating "${item.name.replace(/\.[^.]+$/, '') || `Sheet ${i + 1}`}" in Google Sheets…`, 'loading');
             this.showProgress(fileBase);
 
-            const { result, released } = await this.uploadOneFile(this.files[i], i, {
+            const { result, released } = await this.uploadOneFile(item, i, {
               options,
               hasCleaning,
               shouldTightenGrid,
@@ -3756,10 +4279,14 @@
         // Open all created spreadsheets in new tabs without flooding the browser.
         await this.openResultTabs(results);
 
-        const msg =
-          results.length === 1
+        const allReferences = results.length > 0 && results.every((r) => r.reference);
+        const msg = allReferences
+          ? (results.length === 1
+            ? 'Google Sheet opened — same instance'
+            : `${results.length} Google Sheets opened — same instances`)
+          : (results.length === 1
             ? 'Spreadsheet created and opened!'
-            : `${results.length} spreadsheets created and opened!`;
+            : `${results.length} spreadsheets created and opened!`);
         this.setStatus(msg, 'success');
         this.logTiming('handle upload', uploadStart, {
           mode,
@@ -3799,6 +4326,24 @@
       if (index < 0 || index >= this.files.length) return;
       const item = this.files[index];
       if (!item) return;
+
+      if (item.kind === 'reference') {
+        this.uploading = true;
+        this.renderFileList();
+        this.primaryActionOperation = 'open';
+        this._updatePrimaryAction();
+        try {
+          await chrome.tabs.create({ url: item.refUrl });
+          this.setStatus(`Opened "${item.name}" — same Google Sheet instance`, 'success');
+        } catch (err) {
+          this.setStatus(`Could not open "${item.name}": ${err.message}`, 'error');
+        } finally {
+          this.uploading = false;
+          this.renderFileList();
+          this._updatePrimaryAction();
+        }
+        return;
+      }
 
       const uploadStart = this.now();
       this.uploading = true;

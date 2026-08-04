@@ -41,6 +41,16 @@ global.GoogleAPI = {
   formatUploadedSheet: jest.fn().mockResolvedValue(undefined),
   sheetJsToSheetsFormat: jest.fn((style) => style),
   applyFormatting: jest.fn().mockResolvedValue(undefined),
+  getSpreadsheetInfo: jest.fn().mockResolvedValue({
+    properties: { title: 'Mock Sheet' },
+    sheets: [
+      { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+    ],
+  }),
+  getSpreadsheetValues: jest.fn().mockResolvedValue({ values: [] }),
+  overwriteSpreadsheetWithTypedData: jest.fn().mockResolvedValue(undefined),
+  listAppFiles: jest.fn().mockResolvedValue([]),
+  trashAppFile: jest.fn().mockResolvedValue(undefined),
 };
 global.FileHandleStore = {
   saveHandle: jest.fn().mockResolvedValue('handle-1'),
@@ -143,30 +153,6 @@ async function createApp() {
   return app;
 }
 
-function responseFromChunks(chunks, headers = {}) {
-  let index = 0;
-  const reader = {
-    read: jest.fn(async () => {
-      if (index >= chunks.length) return { done: true, value: undefined };
-      return { done: false, value: chunks[index++] };
-    }),
-    cancel: jest.fn().mockResolvedValue(undefined),
-  };
-  return {
-    ok: true,
-    headers: {
-      get: jest.fn((name) => {
-        const key = name.toLowerCase();
-        return headers[key] === undefined ? null : String(headers[key]);
-      }),
-    },
-    body: {
-      getReader: jest.fn(() => reader),
-      cancel: jest.fn().mockResolvedValue(undefined),
-    },
-  };
-}
-
 function readBuildText(entryName) {
   return fs.readFileSync(path.join(buildRoot, entryName), 'utf8');
 }
@@ -256,16 +242,17 @@ describe('release-readiness regression suite', () => {
       expect(panelHtml).toContain('../lib/lucide.js');
     });
 
-    test('declares required permissions and HTTPS-only optional host access', () => {
+    test('declares required permissions and no broad optional host access', () => {
       expect(manifest.permissions).toEqual(expect.arrayContaining(['sidePanel', 'identity', 'storage']));
       expect(manifest.host_permissions).toEqual(expect.arrayContaining([
         'https://sheets.googleapis.com/*',
         'https://www.googleapis.com/*',
         'https://accounts.google.com/*',
       ]));
-      expect(manifest.optional_host_permissions).toEqual(['https://*/*']);
-      expect(manifest.optional_host_permissions.every((permission) => permission.startsWith('https://'))).toBe(true);
-      expect(manifest.optional_host_permissions.some((permission) => permission.includes('http://'))).toBe(false);
+      // URL import no longer fetches arbitrary origins — the app only talks
+      // to the Google APIs declared in host_permissions, so no optional
+      // host permissions are declared.
+      expect(manifest.optional_host_permissions).toBeUndefined();
     });
 
     test('configures the toolbar action and keyboard shortcut', () => {
@@ -317,78 +304,72 @@ describe('release-readiness regression suite', () => {
       expect(global.fetch).toBeUndefined();
     });
 
-    test('requests the submitted HTTPS origin before fetching a URL', async () => {
+    test('imports a valid Google Sheets link as a reference without network access', async () => {
       const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-      app.handleFiles = jest.fn().mockResolvedValue(undefined);
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/ref123/edit';
+      GoogleAPI.getSpreadsheetInfo.mockResolvedValue({
+        properties: { title: 'Linked Sheet' },
+        sheets: [
+          { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+        ],
+      });
+      GoogleAPI.getSpreadsheetValues.mockResolvedValue({ values: [['a', 'b'], ['1', '2']] });
 
-      let grant;
-      chrome.permissions.request.mockImplementation(() => new Promise((resolve) => { grant = resolve; }));
-      global.fetch = jest.fn().mockResolvedValue(
-        responseFromChunks([new TextEncoder().encode('name\nAlice')], {
-          'content-type': 'text/csv',
-        })
-      );
+      await app.importFromUrl();
 
-      const importPromise = app.importFromUrl();
-      await Promise.resolve();
-      expect(global.fetch).not.toHaveBeenCalled();
-      expect(chrome.permissions.contains).toHaveBeenCalledWith({ origins: ['https://example.com/*'] });
-      expect(chrome.permissions.request).toHaveBeenCalledWith({ origins: ['https://example.com/*'] });
-
-      grant(true);
-      await importPromise;
-
-      expect(global.fetch).toHaveBeenCalledWith('https://example.com/data.csv', expect.objectContaining({
-        signal: expect.any(AbortSignal),
-      }));
-      expect(app.handleFiles).toHaveBeenCalledWith([expect.any(File)]);
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].kind).toBe('reference');
+      expect(app.files[0].refId).toBe('ref123');
+      expect(app.files[0].refUrl).toBe('https://docs.google.com/spreadsheets/d/ref123/edit');
+      expect(chrome.permissions.request).not.toHaveBeenCalled();
+      expect(global.fetch).toBeUndefined();
     });
 
-    test('rejects HTTP URLs before permission or network access', async () => {
+    test('rejects non-docs URLs without permission or network access', async () => {
       const app = await createApp();
       app.urlInput.value = 'http://example.com/data.csv';
       global.fetch = jest.fn();
 
       await app.importFromUrl();
 
-      expect(app.urlHint.textContent).toContain('Only HTTPS URLs are supported');
+      expect(app.urlHint.textContent).toContain('Paste a Google Sheets link');
       expect(chrome.permissions.contains).not.toHaveBeenCalled();
       expect(chrome.permissions.request).not.toHaveBeenCalled();
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    test('enforces the URL Content-Length limit before reading the body', async () => {
+    test('explains that files not created by the app cannot be accessed', async () => {
+      GoogleAPI.getSpreadsheetInfo.mockRejectedValueOnce(
+        new Error('Google API 403: The caller does not have permission')
+      );
       const app = await createApp();
-      app.urlInput.value = 'https://example.com/large.csv';
-      chrome.permissions.contains.mockResolvedValue(true);
-      const getReader = jest.fn();
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        headers: { get: (name) => name === 'content-length' ? String(51 * 1024 * 1024) : null },
-        body: { getReader, cancel: jest.fn().mockResolvedValue(undefined) },
-      });
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/other123/edit';
 
       await app.importFromUrl();
 
-      expect(getReader).not.toHaveBeenCalled();
-      expect(app.loadingText.textContent).toContain('Maximum supported size is 50 MB');
+      expect(app.files).toHaveLength(0);
+      expect(app.loadingText.textContent).toContain('can only open Google Sheets it created itself');
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
       expect(app.urlFetchBtn.disabled).toBe(false);
     });
 
-    test('enforces the URL streaming limit when Content-Length is absent', async () => {
+    test('rejects duplicate references of the same spreadsheet', async () => {
+      GoogleAPI.getSpreadsheetInfo.mockResolvedValue({
+        properties: { title: 'Linked Sheet' },
+        sheets: [
+          { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+        ],
+      });
+      GoogleAPI.getSpreadsheetValues.mockResolvedValue({ values: [['a', 'b']] });
       const app = await createApp();
-      app.urlInput.value = 'https://example.com/stream.csv';
-      chrome.permissions.contains.mockResolvedValue(true);
-      global.fetch = jest.fn().mockResolvedValue(
-        responseFromChunks([{ byteLength: 50 * 1024 * 1024 + 1 }])
-      );
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/ref123/edit';
+      await app.importFromUrl();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/ref123/view';
 
       await app.importFromUrl();
 
-      expect(app.loadingText.textContent).toContain('File too large');
-      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.urlFetchBtn.disabled).toBe(false);
+      expect(app.files).toHaveLength(1);
+      expect(app.urlHint.textContent).toContain('already in your list');
     });
   });
 

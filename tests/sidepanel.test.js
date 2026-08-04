@@ -102,6 +102,16 @@ global.GoogleAPI = {
   formatUploadedSheet: jest.fn().mockResolvedValue(undefined),
   sheetJsToSheetsFormat: jest.fn(),
   applyFormatting: jest.fn().mockResolvedValue(undefined),
+  getSpreadsheetInfo: jest.fn().mockResolvedValue({
+    properties: { title: 'Mock Sheet' },
+    sheets: [
+      { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+    ],
+  }),
+  getSpreadsheetValues: jest.fn().mockResolvedValue({ values: [] }),
+  overwriteSpreadsheetWithTypedData: jest.fn().mockResolvedValue(undefined),
+  listAppFiles: jest.fn().mockResolvedValue([]),
+  trashAppFile: jest.fn().mockResolvedValue(undefined),
 };
 
 global.lucide = {
@@ -142,9 +152,13 @@ if (typeof global.DragToSheetsApp !== 'function') {
 function setupDOM() {
   window.lucide = global.lucide;
   document.body.innerHTML = `
+    <button id="files-btn" class="theme-toggle" title="All your files" aria-label="Open all your files">
+      <i data-lucide="folder-open" class="app-icon" aria-hidden="true"></i>
+    </button>
     <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
       <i data-lucide="moon" class="app-icon" aria-hidden="true"></i>
     </button>
+    <div id="app-view">
     <div id="drop-zone" tabindex="0"></div>
     <input type="file" id="file-input" multiple>
     <ul id="file-list"></ul>
@@ -241,7 +255,19 @@ function setupDOM() {
       <input type="text" id="url-input">
       <button id="url-fetch-btn">Fetch</button>
       <p class="url-hint">Only import files from URLs you trust.</p>
+      <div id="docs-link-history" class="docs-link-history hidden">
+        <ul id="docs-link-history-list"></ul>
+      </div>
     </div>
+    </div>
+    <section id="files-view" class="hidden">
+      <button id="files-back-btn">Back</button>
+      <p id="files-status"></p>
+      <input id="files-search" type="search">
+      <button id="files-clear">Clear all</button>
+      <button id="files-refresh">Refresh</button>
+      <ul id="files-list"></ul>
+    </section>
   `;
 }
 
@@ -267,85 +293,6 @@ describe('DragToSheetsApp', () => {
   });
 
   // ---- resolveFileName ----
-
-  describe('resolveFileName', () => {
-    // Test directly on prototype since it doesn't use `this`
-    const resolve = global.DragToSheetsApp.prototype.resolveFileName;
-
-    test('extracts filename from Content-Disposition header', () => {
-      expect(
-        resolve('https://example.com/api', 'attachment; filename="data.csv"', '')
-      ).toBe('data.csv');
-    });
-
-    test('handles Content-Disposition without quotes', () => {
-      expect(
-        resolve('https://example.com/api', 'attachment; filename=export.xlsx', '')
-      ).toBe('export.xlsx');
-    });
-
-    test('extracts filename from URL path segment', () => {
-      expect(
-        resolve('https://example.com/files/report.csv', '', '')
-      ).toBe('report.csv');
-    });
-
-    test('URL-decodes filename from path', () => {
-      expect(
-        resolve('https://example.com/my%20file.csv', '', '')
-      ).toBe('my file.csv');
-    });
-
-    test('infers filename from Content-Type: text/csv', () => {
-      expect(resolve('https://example.com/api', '', 'text/csv')).toBe('import.csv');
-    });
-
-    test('infers filename from Content-Type: text/tab-separated-values', () => {
-      expect(
-        resolve('https://example.com/api', '', 'text/tab-separated-values')
-      ).toBe('import.tsv');
-    });
-
-    test('infers xlsx from Content-Type', () => {
-      expect(
-        resolve(
-          'https://example.com/api',
-          '',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-      ).toBe('import.xlsx');
-    });
-
-    test('infers xls from Content-Type', () => {
-      expect(
-        resolve('https://example.com/api', '', 'application/vnd.ms-excel')
-      ).toBe('import.xls');
-    });
-
-    test('falls back to import.csv when nothing matches', () => {
-      expect(resolve('https://example.com/api', '', 'application/json')).toBe(
-        'import.csv'
-      );
-    });
-
-    test('Content-Disposition takes priority over URL path', () => {
-      expect(
-        resolve(
-          'https://example.com/wrong.xlsx',
-          'attachment; filename="correct.csv"',
-          ''
-        )
-      ).toBe('correct.csv');
-    });
-
-    test('URL path takes priority over Content-Type', () => {
-      expect(
-        resolve('https://example.com/data.tsv', '', 'text/csv')
-      ).toBe('data.tsv');
-    });
-  });
-
-  // ---- fileIcon ----
 
   describe('fileIcon', () => {
     let app;
@@ -2929,6 +2876,36 @@ describe('DragToSheetsApp', () => {
       expect(app.files[1].name).toBe('a.csv');
     });
 
+    test('refreshes mapping dropdowns when the master file changes after a move', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      document.getElementById('opt-smart-mapping').checked = false;
+      app.customMappings = [{ from: 'code', to: 'id' }, { from: '', to: '' }];
+      app.files = [
+        { name: 'a.csv', ext: 'csv', parsed: { sheets: [{ name: 'a', data: [['id', 'name'], ['1', 'x']] }] } },
+        { name: 'b.csv', ext: 'csv', parsed: { sheets: [{ name: 'b', data: [['code', 'label'], ['2', 'y']] }] } },
+      ];
+
+      await app.updateCustomMappingVisibility();
+
+      let selects = app.customMappingList.querySelectorAll('select');
+      expect(Array.from(selects[0].querySelectorAll('option')).map((opt) => opt.value)).toEqual(['code', 'label']);
+      expect(Array.from(selects[1].querySelectorAll('option')).map((opt) => opt.value)).toEqual(['id', 'name']);
+      expect(app.customMappingList.querySelectorAll('.custom-mapping-row')).toHaveLength(2);
+
+      // Moving the master file down makes b.csv the master; the mapping
+      // dropdowns must reflect the new master/source split immediately.
+      app.moveFile(0, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      selects = app.customMappingList.querySelectorAll('select');
+      expect(Array.from(selects[0].querySelectorAll('option')).map((opt) => opt.value)).toEqual(['id', 'name']);
+      expect(Array.from(selects[1].querySelectorAll('option')).map((opt) => opt.value)).toEqual(['code', 'label']);
+      // The mapping that referenced the old master as a target is dropped.
+      expect(app.customMappingList.querySelectorAll('.custom-mapping-row')).toHaveLength(1);
+    });
+
     test('does nothing when moving first file up', async () => {
       const app = await createApp();
       app.files = [
@@ -3263,8 +3240,11 @@ describe('DragToSheetsApp', () => {
       const fromOptions = Array.from(selects[0].querySelectorAll('option')).map((opt) => opt.value);
       const toOptions = Array.from(selects[1].querySelectorAll('option')).map((opt) => opt.value);
 
-      expect(fromOptions).toEqual(['', 'email_address']);
-      expect(toOptions).toEqual(['', 'first_name']);
+      expect(fromOptions).toEqual(['email_address']);
+      expect(toOptions).toEqual(['first_name']);
+      expect(
+        Array.from(app.customMappingList.querySelectorAll('.custom-mapping-label')).map((el) => el.textContent)
+      ).toEqual(['Source', 'Master']);
     });
 
     test('treats fuzzy smart matches as already mapped once smart mapping is active', async () => {
@@ -3292,7 +3272,7 @@ describe('DragToSheetsApp', () => {
       const fromSelect = app.customMappingList.querySelector('select');
       const fromOptions = Array.from(fromSelect.querySelectorAll('option')).map((opt) => opt.value);
 
-      expect(fromOptions).toEqual(['', 'student_email']);
+      expect(fromOptions).toEqual(['student_email']);
       expect(fromOptions).not.toContain('First Name');
     });
 
@@ -3323,10 +3303,11 @@ describe('DragToSheetsApp', () => {
 
       const selects = app.customMappingList.querySelectorAll('select');
       const fromOptions = Array.from(selects[0].querySelectorAll('option')).map((opt) => opt.value);
-      expect(fromOptions).toEqual(['', 'email_address']);
+      expect(fromOptions).toEqual(['email_address']);
 
       // Manually adding another mapping row should also work without the checkbox checked.
       app.addCustomMapping();
+      await Promise.resolve();
       await Promise.resolve();
       expect(app.customMappingList.querySelectorAll('.custom-mapping-row').length).toBe(2);
     });
@@ -4464,299 +4445,523 @@ describe('DragToSheetsApp', () => {
 
   // ---- URL Import Permission Flow ----
 
-  describe('importFromUrl permission flow', () => {
+  describe('importFromUrl docs link references', () => {
+    const spreadsheetInfo = {
+      properties: { title: 'My Linked Sheet' },
+      sheets: [
+        { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+      ],
+    };
+
     beforeEach(() => {
-      chrome.permissions.contains.mockResolvedValue(false);
-      chrome.permissions.request.mockResolvedValue(true);
+      GoogleAPI.getSpreadsheetInfo.mockResolvedValue(spreadsheetInfo);
+      GoogleAPI.getSpreadsheetValues.mockResolvedValue({ values: [['a', 'b'], ['1', '2']] });
     });
 
-    test('opening URL section does not request permission', async () => {
+    test('adds a reference entry for a valid Google Sheets link', async () => {
       const app = await createApp();
-
-      await app.toggleUrlBar(true);
-
-      expect(app.urlBar.classList.contains('hidden')).toBe(false);
-      expect(chrome.permissions.request).not.toHaveBeenCalled();
-      expect(chrome.permissions.contains).not.toHaveBeenCalled();
-    });
-
-    test('invalid URL shows error', async () => {
-      const app = await createApp();
-      app.urlInput.value = 'not a url';
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/edit#gid=0';
 
       await app.importFromUrl();
 
-      expect(app.urlHint.textContent).toContain('Enter a valid URL');
+      expect(app.files).toHaveLength(1);
+      const entry = app.files[0];
+      expect(entry.kind).toBe('reference');
+      expect(entry.refId).toBe('abc123');
+      expect(entry.refUrl).toBe('https://docs.google.com/spreadsheets/d/abc123/edit');
+      expect(entry.name).toBe('My Linked Sheet');
+      expect(entry.sheetMetadata).toEqual([
+        { name: 'Sheet1', rowCount: 2, colCount: 2 },
+      ]);
+      expect(GoogleAPI.getSpreadsheetInfo).toHaveBeenCalledWith('abc123');
+      expect(app.urlInput.value).toBe('');
     });
 
-    test('HTTP URL is rejected', async () => {
+    test('accepts drive.google.com file links', async () => {
       const app = await createApp();
-      app.urlInput.value = 'http://example.com/data.csv';
+      app.urlInput.value = 'https://drive.google.com/file/d/drv-987/view?usp=sharing';
 
       await app.importFromUrl();
 
-      expect(app.urlHint.textContent).toContain('Only HTTPS URLs are supported');
-      expect(chrome.permissions.request).not.toHaveBeenCalled();
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].refId).toBe('drv-987');
+      expect(app.files[0].refUrl).toBe('https://docs.google.com/spreadsheets/d/drv-987/edit');
     });
 
-    test('already-granted origin skips permission request', async () => {
-      chrome.permissions.contains.mockResolvedValue(true);
+    test('rejects non-docs URLs with an informative tooltip', async () => {
       const app = await createApp();
       app.urlInput.value = 'https://example.com/data.csv';
 
-      // Prevent actual fetch
-      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
-
       await app.importFromUrl();
 
-      expect(chrome.permissions.contains).toHaveBeenCalledWith({
-        origins: ['https://example.com/*'],
-      });
-      expect(chrome.permissions.request).not.toHaveBeenCalled();
-
-      delete global.fetch;
-    });
-
-    test('newly granted permission proceeds to fetch', async () => {
-      chrome.permissions.contains.mockResolvedValue(false);
-      chrome.permissions.request.mockResolvedValue(true);
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-
-      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
-
-      await app.importFromUrl();
-
-      expect(chrome.permissions.request).toHaveBeenCalledWith({
-        origins: ['https://example.com/*'],
-      });
-      expect(global.fetch).toHaveBeenCalled();
-
-      delete global.fetch;
-    });
-
-    test('permission denial shows warning and does not clear URL', async () => {
-      chrome.permissions.request.mockResolvedValue(false);
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-
-      global.fetch = jest.fn();
-
-      await app.importFromUrl();
-
-      expect(chrome.permissions.request).toHaveBeenCalledWith({
-        origins: ['https://example.com/*'],
-      });
+      expect(app.files).toHaveLength(0);
+      expect(GoogleAPI.getSpreadsheetInfo).not.toHaveBeenCalled();
+      expect(app.urlHint.textContent).toContain('Paste a Google Sheets link');
       expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.loadingText.textContent).toContain('Permission denied');
-      expect(app.urlInput.value).toBe('https://example.com/data.csv');
-      expect(global.fetch).not.toHaveBeenCalled();
-
-      delete global.fetch;
     });
 
-    test('fetch does not start before permission is approved', async () => {
-      chrome.permissions.contains.mockResolvedValue(false);
-      chrome.permissions.request.mockResolvedValue(false);
+    test('rejects docs links that are not spreadsheets', async () => {
       const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-
-      global.fetch = jest.fn();
+      app.urlInput.value = 'https://docs.google.com/document/d/doc123/edit';
 
       await app.importFromUrl();
 
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(app.files).toHaveLength(0);
+      expect(GoogleAPI.getSpreadsheetInfo).not.toHaveBeenCalled();
+      expect(app.urlHint.textContent).toContain('Paste a Google Sheets link');
+    });
 
-      delete global.fetch;
+    test('rejects duplicate references of the same spreadsheet', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/edit';
+      await app.importFromUrl();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/view';
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.urlHint.textContent).toContain('already in your list');
+    });
+
+    test('explains that files not created by the app cannot be accessed', async () => {
+      GoogleAPI.getSpreadsheetInfo.mockRejectedValueOnce(new Error('Google API 403: The caller does not have permission'));
+      const app = await createApp();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/other123/edit';
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(0);
+      expect(app.loadingText.textContent).toContain('can only open Google Sheets it created itself');
+      expect(app.loadingText.textContent).toContain('was not created by the app');
+      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+    });
+
+    test('rejects HTTP links and invalid URLs', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'http://docs.google.com/spreadsheets/d/abc123/edit';
+      await app.importFromUrl();
+      expect(app.files).toHaveLength(0);
+
+      app.urlInput.value = 'not a url';
+      await app.importFromUrl();
+      expect(app.files).toHaveLength(0);
+      expect(app.urlHint.textContent).toContain('Paste a Google Sheets link');
+    });
+
+    test('restores reference entries from a saved session', async () => {
+      chrome.storage.session.get.mockResolvedValue({
+        files: [{
+          kind: 'reference',
+          refId: 'abc123',
+          refUrl: 'https://docs.google.com/spreadsheets/d/abc123/edit',
+          name: 'My Linked Sheet',
+          ext: 'gsheet',
+          identityKey: 'ref:abc123',
+          sheetMetadata: [{ name: 'Sheet1', rowCount: 2, colCount: 2 }],
+          lazy: true,
+        }],
+        sessionSummary: null,
+      });
+
+      const app = await createApp();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].kind).toBe('reference');
+      expect(app.files[0].refId).toBe('abc123');
+    });
+
+    test('preview fetches a bounded sample of the referenced sheet', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/edit';
+      await app.importFromUrl();
+      GoogleAPI.getSpreadsheetValues.mockClear();
+
+      const preview = await app.ensurePreviewSample(app.files[0], { merge: true });
+
+      expect(GoogleAPI.getSpreadsheetValues).toHaveBeenCalledWith(
+        'abc123',
+        expect.stringMatching(/^'Sheet1'!A1:/)
+      );
+      expect(preview.sheets[0].data).toEqual([['a', 'b'], ['1', '2']]);
+    });
+
+    test('preview shows informative error when a referenced sheet is inaccessible', async () => {
+      const app = await createApp();
+      app.files = [app.createReferenceEntry('x', 'https://docs.google.com/spreadsheets/d/x/edit', spreadsheetInfo)];
+      GoogleAPI.getSpreadsheetValues.mockRejectedValueOnce(new Error('Google API 403: The caller does not have permission'));
+
+      await expect(app.ensurePreviewSample(app.files[0], { merge: true })).rejects.toThrow('can only open Google Sheets it created itself');
+    });
+
+    test('records imported links in recent history', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/edit';
+
+      await app.importFromUrl();
+
+      expect(app.docsLinkHistory).toEqual([
+        { url: 'https://docs.google.com/spreadsheets/d/abc123/edit', name: 'My Linked Sheet' },
+      ]);
+      expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
+        docsLinkHistory: app.docsLinkHistory,
+      }));
+      expect(app.docsLinkHistorySection.classList.contains('hidden')).toBe(false);
+      expect(app.docsLinkHistoryList.querySelectorAll('.docs-link-history-item')).toHaveLength(1);
+    });
+
+    test('keeps only the three most recent imports', async () => {
+      const app = await createApp();
+      for (const id of ['a1', 'a2', 'a3', 'a4']) {
+        app.urlInput.value = `https://docs.google.com/spreadsheets/d/${id}/edit`;
+        await app.importFromUrl();
+      }
+
+      expect(app.docsLinkHistory.map((h) => h.url)).toEqual([
+        'https://docs.google.com/spreadsheets/d/a4/edit',
+        'https://docs.google.com/spreadsheets/d/a3/edit',
+        'https://docs.google.com/spreadsheets/d/a2/edit',
+      ]);
+    });
+
+    test('loads a file from the files view into the app', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        {
+          id: 'f1',
+          name: 'Merged sheet',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T10:00:00.000Z',
+        },
+      ]);
+      GoogleAPI.getSpreadsheetInfo.mockResolvedValue({
+        properties: { title: 'Merged sheet' },
+        sheets: [
+          { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+        ],
+      });
+
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      app.filesList.querySelector('.files-load-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].kind).toBe('reference');
+      expect(app.files[0].refId).toBe('f1');
+      expect(app.files[0].refUrl).toBe('https://docs.google.com/spreadsheets/d/f1/edit');
+      expect(app.loadingText.textContent).toContain('Loaded "Merged sheet"');
+
+      // Loading the same file again is refused.
+      app.filesList.querySelector('.files-load-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(app.files).toHaveLength(1);
+      expect(app.loadingText.textContent).toContain('already in your file list');
+    });
+
+    test('removes a file from the files view and drops its reference', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        {
+          id: 'f1',
+          name: 'Merged sheet',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T10:00:00.000Z',
+        },
+      ]);
+      GoogleAPI.getSpreadsheetInfo.mockResolvedValue({
+        properties: { title: 'Merged sheet' },
+        sheets: [
+          { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 1000, columnCount: 26 } } },
+        ],
+      });
+
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Load it into the app first, then remove it from the files view.
+      app.filesList.querySelector('.files-load-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(app.files).toHaveLength(1);
+
+      GoogleAPI.listAppFiles.mockResolvedValue([]);
+      app.filesList.querySelector('.files-remove-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(GoogleAPI.trashAppFile).toHaveBeenCalledWith('f1');
+      expect(app.files).toHaveLength(0);
+      expect(app.filesStatus.textContent).toContain('No files yet');
+      expect(app.loadingText.textContent).toContain('now in your Google Drive trash');
+    });
+
+    test('clears all files only after the second click on Confirm', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        {
+          id: 'f1',
+          name: 'One',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T00:00:00.000Z',
+        },
+        {
+          id: 'f2',
+          name: 'Two',
+          url: 'https://docs.google.com/spreadsheets/d/f2/edit',
+          addedAt: '2026-07-02T00:00:00.000Z',
+        },
+      ]);
+
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const clearBtn = document.getElementById('files-clear');
+      expect(clearBtn.textContent).toBe('Clear all');
+
+      // First click only arms the button.
+      clearBtn.click();
+      expect(clearBtn.textContent).toBe('Confirm');
+      expect(clearBtn.classList.contains('files-clear-btn--armed')).toBe(true);
+      expect(GoogleAPI.trashAppFile).not.toHaveBeenCalled();
+
+      // Second click performs the removal.
+      clearBtn.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(GoogleAPI.trashAppFile).toHaveBeenCalledWith('f1');
+      expect(GoogleAPI.trashAppFile).toHaveBeenCalledWith('f2');
+      expect(app.loadingText.textContent).toContain('2 file(s) removed');
+      expect(clearBtn.textContent).toBe('Clear all');
+    });
+
+    test('searches the files list by name', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        { id: 'f1', name: 'Alpha report', url: 'https://docs.google.com/spreadsheets/d/f1/edit', addedAt: '2026-07-01T00:00:00.000Z' },
+        { id: 'f2', name: 'Beta numbers', url: 'https://docs.google.com/spreadsheets/d/f2/edit', addedAt: '2026-07-02T00:00:00.000Z' },
+      ]);
+
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(app.filesList.querySelectorAll('.files-item')).toHaveLength(2);
+
+      const search = document.getElementById('files-search');
+      search.value = 'alpha';
+      search.dispatchEvent(new Event('input'));
+
+      expect(app.filesList.querySelectorAll('.files-item')).toHaveLength(1);
+      expect(app.filesList.querySelector('.files-item-name').textContent).toBe('Alpha report');
+      expect(app.filesStatus.textContent).toContain('1 of 2 file(s)');
+
+      search.value = 'zzz';
+      search.dispatchEvent(new Event('input'));
+      expect(app.filesList.querySelectorAll('.files-item')).toHaveLength(0);
+      expect(app.filesStatus.textContent).toContain('No files match your search');
+
+      search.value = '';
+      search.dispatchEvent(new Event('input'));
+      expect(app.filesList.querySelectorAll('.files-item')).toHaveLength(2);
+      expect(app.filesStatus.textContent).toContain('2 file(s) accessible');
+    });
+
+    test('clear all removes every file even while a search is active', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        { id: 'f1', name: 'Alpha report', url: 'https://docs.google.com/spreadsheets/d/f1/edit', addedAt: '2026-07-01T00:00:00.000Z' },
+        { id: 'f2', name: 'Beta numbers', url: 'https://docs.google.com/spreadsheets/d/f2/edit', addedAt: '2026-07-02T00:00:00.000Z' },
+      ]);
+
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const search = document.getElementById('files-search');
+      search.value = 'alpha';
+      search.dispatchEvent(new Event('input'));
+
+      const clearBtn = document.getElementById('files-clear');
+      clearBtn.click();
+      clearBtn.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(GoogleAPI.trashAppFile).toHaveBeenCalledWith('f1');
+      expect(GoogleAPI.trashAppFile).toHaveBeenCalledWith('f2');
+      expect(app.loadingText.textContent).toContain('2 file(s) removed');
+    });
+
+    test('re-arming is required after the view closes', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        {
+          id: 'f1',
+          name: 'One',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T00:00:00.000Z',
+        },
+      ]);
+
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const clearBtn = document.getElementById('files-clear');
+      clearBtn.click();
+      expect(clearBtn.textContent).toBe('Confirm');
+
+      document.getElementById('files-back-btn').click();
+      expect(clearBtn.textContent).toBe('Clear all');
+    });
+
+    test('does not leave the reading spinner behind after loading reference data', async () => {
+      const app = await createApp();
+      app.files = [app.createReferenceEntry(
+        'abc123',
+        'https://docs.google.com/spreadsheets/d/abc123/edit',
+        spreadsheetInfo
+      )];
+      GoogleAPI.getSpreadsheetValues.mockResolvedValue({ values: [['a', 'b'], ['1', '2']] });
+
+      await app.ensureReferenceDataForFiles(app.files);
+
+      expect(app.files[0].refData.data).toEqual([['a', 'b'], ['1', '2']]);
+      expect(app.loadingSpinner.classList.contains('hidden')).toBe(true);
+      expect(app.loadingText.textContent).toContain('file(s) ready');
+    });
+
+    test('restores recent imports from persistent storage', async () => {
+      chrome.storage.local.get.mockResolvedValue({
+        prefs: {},
+        docsLinkHistory: [
+          { url: 'https://docs.google.com/spreadsheets/d/a1/edit', name: 'One' },
+          { url: 'https://docs.google.com/spreadsheets/d/a2/edit', name: 'Two' },
+        ],
+      });
+
+      const app = await createApp();
+
+      expect(app.docsLinkHistory).toEqual([
+        { url: 'https://docs.google.com/spreadsheets/d/a1/edit', name: 'One' },
+        { url: 'https://docs.google.com/spreadsheets/d/a2/edit', name: 'Two' },
+      ]);
+      expect(app.docsLinkHistoryList.children).toHaveLength(2);
+    });
+
+    test('renders history items that refill the import input', async () => {
+      chrome.storage.local.get.mockResolvedValue({
+        prefs: {},
+        docsLinkHistory: [
+          { url: 'https://docs.google.com/spreadsheets/d/a1/edit', name: 'One' },
+        ],
+      });
+
+      const app = await createApp();
+      app.docsLinkHistoryList.querySelector('button').click();
+
+      expect(app.urlInput.value).toBe('https://docs.google.com/spreadsheets/d/a1/edit');
+    });
+
+    test('opening a reference opens the same Google Sheets instance', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/edit';
+      await app.importFromUrl();
+
+      await app.uploadSingleFromList(0);
+
+      expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'https://docs.google.com/spreadsheets/d/abc123/edit' });
+      expect(GoogleAPI.uploadFileToDrive).not.toHaveBeenCalled();
+    });
+
+    test('merging with a referenced master writes back into the same instance', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.urlInput.value = 'https://docs.google.com/spreadsheets/d/abc123/edit';
+      await app.importFromUrl();
+      app.files.push({
+        name: 'local.csv', ext: 'csv',
+        parsed: { sheets: [{ name: 'local', data: [['Name'], ['Alice']] }] },
+      });
+      GoogleAPI.createSpreadsheet.mockClear();
+      GoogleAPI.overwriteSpreadsheetWithTypedData.mockClear();
+
+      await app.handleUpload();
+
+      expect(GoogleAPI.overwriteSpreadsheetWithTypedData).toHaveBeenCalled();
+      expect(GoogleAPI.createSpreadsheet).not.toHaveBeenCalled();
+      expect(GoogleAPI.overwriteSpreadsheetWithTypedData.mock.calls[0][0]).toBe('abc123');
+      expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'https://docs.google.com/spreadsheets/d/abc123/edit' });
     });
   });
 
-  // ---- URL import download size limit ----
-
-  describe('importFromUrl download size limit', () => {
-    beforeEach(() => {
-      chrome.permissions.contains.mockResolvedValue(true);
-    });
-
-    function makeMockResponse(opts = {}) {
-      const chunks = opts.chunks || [];
-      let chunkIndex = 0;
-      const reader = {
-        read: jest.fn().mockImplementation(() => {
-          if (chunkIndex < chunks.length) {
-            return Promise.resolve({ done: false, value: chunks[chunkIndex++] });
-          }
-          return Promise.resolve({ done: true, value: undefined });
-        }),
-        cancel: jest.fn().mockResolvedValue(undefined),
-      };
-
-      return {
-        ok: opts.ok !== false,
-        headers: {
-          get: jest.fn((name) => {
-            const lower = name.toLowerCase();
-            if (lower === 'content-length') {
-              return opts.contentLength !== undefined ? String(opts.contentLength) : null;
-            }
-            if (lower === 'content-type') return opts.contentType || 'text/csv';
-            if (lower === 'content-disposition') return opts.contentDisposition || '';
-            return null;
-          }),
+  describe('files view', () => {
+    test('toggles the files view inside the side panel', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        {
+          id: 'f1',
+          name: 'Merged sheet',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T12:00:00.000Z',
         },
-        body: { getReader: () => reader },
-      };
-    }
+      ]);
 
-    test('small response with Content-Length succeeds', async () => {
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-      const data = 'a,b\n1,2';
-      const encoded = new TextEncoder().encode(data);
-      global.fetch = jest.fn().mockResolvedValue(
-        makeMockResponse({ chunks: [encoded], contentLength: encoded.byteLength })
-      );
-      Parser.parse.mockResolvedValue({ sheets: [{ name: 'test', data: [['a','b'],['1','2']] }] });
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
 
-      await app.importFromUrl();
+      expect(app.filesView.classList.contains('hidden')).toBe(false);
+      expect(app.appView.classList.contains('hidden')).toBe(true);
+      expect(chrome.tabs.create).not.toHaveBeenCalled();
+      expect(app.filesList.querySelectorAll('.files-item')).toHaveLength(1);
+      const link = app.filesList.querySelector('.files-item-link');
+      expect(link.getAttribute('href')).toBe('https://docs.google.com/spreadsheets/d/f1/edit');
+      expect(link.getAttribute('target')).toBe('_blank');
+      expect(app.filesList.querySelector('.files-item-name').textContent).toBe('Merged sheet');
+      expect(app.filesList.querySelector('.files-item-date').textContent).toMatch(/^Jul \d{1,2}, 2026$/);
+      expect(app.filesStatus.textContent).toContain('1 file(s)');
 
-      expect(app.files).toHaveLength(1);
-      expect(app.files[0].name).toBe('data.csv');
-      expect(app.urlFetchBtn.disabled).toBe(false);
-
-      delete global.fetch;
+      // Toggling again closes the view.
+      document.getElementById('files-btn').click();
+      expect(app.filesView.classList.contains('hidden')).toBe(true);
+      expect(app.appView.classList.contains('hidden')).toBe(false);
     });
 
-    test('oversized Content-Length rejects immediately without calling getReader', async () => {
+    test('back button closes the files view', async () => {
       const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-      const getReader = jest.fn();
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        headers: {
-          get: jest.fn((name) => {
-            if (name.toLowerCase() === 'content-length') return String(60 * 1024 * 1024);
-            return null;
-          }),
-        },
-        body: { cancel: jest.fn().mockResolvedValue(undefined), getReader },
-      });
+      GoogleAPI.listAppFiles.mockResolvedValue([]);
 
-      await app.importFromUrl();
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      document.getElementById('files-back-btn').click();
 
-      expect(app.loadingText.textContent).toContain('File too large');
-      expect(app.loadingText.textContent).toContain('50 MB');
-      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.urlFetchBtn.disabled).toBe(false);
-      expect(getReader).not.toHaveBeenCalled();
-
-      delete global.fetch;
+      expect(app.filesView.classList.contains('hidden')).toBe(true);
+      expect(app.appView.classList.contains('hidden')).toBe(false);
     });
 
-    test('missing Content-Length succeeds for small stream', async () => {
+    test('shows an informative error when the file list cannot load', async () => {
       const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-      const data = 'a,b\n1,2';
-      const encoded = new TextEncoder().encode(data);
-      global.fetch = jest.fn().mockResolvedValue(
-        makeMockResponse({ chunks: [encoded], contentLength: null })
-      );
-      Parser.parse.mockResolvedValue({ sheets: [{ name: 'test', data: [['a','b'],['1','2']] }] });
+      GoogleAPI.listAppFiles.mockRejectedValue(new Error('Google API 403: Forbidden'));
 
-      await app.importFromUrl();
+      document.getElementById('files-btn').click();
+      await Promise.resolve();
+      await Promise.resolve();
 
-      expect(app.files).toHaveLength(1);
-      expect(app.urlFetchBtn.disabled).toBe(false);
-
-      delete global.fetch;
-    });
-
-    test('stream exceeding limit is aborted', async () => {
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-      global.fetch = jest.fn().mockResolvedValue(
-        makeMockResponse({
-          chunks: [{ byteLength: 60 * 1024 * 1024 }],
-          contentLength: null,
-        })
-      );
-
-      await app.importFromUrl();
-
-      expect(app.loadingText.textContent).toContain('File too large');
-      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.urlFetchBtn.disabled).toBe(false);
-
-      delete global.fetch;
-    });
-
-    test('stream ending below limit with Content-Length succeeds', async () => {
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-      const data = 'x,y\n1,2';
-      const encoded = new TextEncoder().encode(data);
-      global.fetch = jest.fn().mockResolvedValue(
-        makeMockResponse({ chunks: [encoded], contentLength: encoded.byteLength })
-      );
-      Parser.parse.mockResolvedValue({ sheets: [{ name: 'test', data: [['x','y'],['1','2']] }] });
-
-      await app.importFromUrl();
-
-      expect(app.files).toHaveLength(1);
-      expect(app.files[0].name).toBe('data.csv');
-
-      delete global.fetch;
-    });
-
-    test('timeout aborts the download', async () => {
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-
-      global.fetch = jest.fn().mockImplementation((_url, options) => {
-        return new Promise((_resolve, reject) => {
-          options.signal.addEventListener('abort', () => {
-            reject(new DOMException('Aborted', 'AbortError'));
-          });
-        });
-      });
-
-      const importPromise = app.importFromUrl();
-      await flushPromises();
-
-      app.currentFetchController.abort();
-      await importPromise;
-
-      expect(app.loadingText.textContent).toContain('cancelled or timed out');
-      expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
-      expect(app.urlFetchBtn.disabled).toBe(false);
-      expect(app.currentFetchController).toBeNull();
-
-      delete global.fetch;
-    });
-
-    test('manual cancellation aborts the download', async () => {
-      const app = await createApp();
-      app.urlInput.value = 'https://example.com/data.csv';
-
-      global.fetch = jest.fn().mockImplementation((_url, options) => {
-        return new Promise((_resolve, reject) => {
-          options.signal.addEventListener('abort', () => {
-            reject(new DOMException('Aborted', 'AbortError'));
-          });
-        });
-      });
-
-      const importPromise = app.importFromUrl();
-      await flushPromises();
-
-      app.toggleUrlBar(false);
-      await importPromise;
-
-      expect(app.loadingText.textContent).toContain('cancelled or timed out');
-      expect(app.urlFetchBtn.disabled).toBe(false);
-      expect(app.currentFetchController).toBeNull();
-
-      delete global.fetch;
+      expect(app.filesStatus.textContent).toContain('Could not load your files');
+      expect(app.filesStatus.classList.contains('files-status--error')).toBe(true);
     });
   });
 

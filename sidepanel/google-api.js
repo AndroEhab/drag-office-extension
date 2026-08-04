@@ -132,6 +132,66 @@ const GoogleAPI = (() => {
 
   // ---- Sheet name helpers ----
 
+  /**
+   * List spreadsheets the app can access — under the per-file Drive scope
+   * that is exactly the files this app created itself — newest first.
+   * Returns [{ id, name, url, addedAt }] where addedAt is the file creation
+   * time (the moment the app uploaded/created it).
+   */
+  async function listAppFiles(context) {
+    const fields = 'nextPageToken,files(id,name,createdTime)';
+    const query = encodeURIComponent("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false");
+    const MAX_PAGES = 5;
+    const files = [];
+    let pageToken = null;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      let url = `https://www.googleapis.com/drive/v3/files?q=${query}&pageSize=100&fields=${encodeURIComponent(fields)}&orderBy=createdTime%20desc`;
+      if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+
+      const body = await apiRequest(url, {}, context);
+
+      for (const f of body.files || []) {
+        files.push({
+          id: f.id,
+          name: f.name || 'Untitled',
+          url: `https://docs.google.com/spreadsheets/d/${f.id}/edit`,
+          addedAt: f.createdTime || null,
+        });
+      }
+
+      pageToken = body.nextPageToken || null;
+      if (!pageToken) break;
+    }
+
+    return files;
+  }
+
+  /**
+   * Move a spreadsheet created by this app to the trash. Reversible — trashed
+   * files no longer appear in listAppFiles(). The `trashed` flag is a file
+   * resource field, so it must go in the request body, not the query string.
+   */
+  async function trashAppFile(fileId, context) {
+    await apiRequest(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`,
+      { method: 'PATCH', body: JSON.stringify({ trashed: true }) },
+      context
+    );
+  }
+
+  /**
+   * Read cell values from a spreadsheet range (A1 notation, e.g. "'Sheet 1'").
+   * Returns the parsed JSON response (`values` array of rows).
+   */
+  async function getSpreadsheetValues(spreadsheetId, range, context) {
+    return apiRequest(
+      `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}`,
+      {},
+      context
+    );
+  }
+
   function sanitizeSheetName(name) {
     let safe = String(name || 'Sheet')
       .replace(/[\\/?*[\]]/g, '_')
@@ -889,6 +949,94 @@ const GoogleAPI = (() => {
   }
 
   /**
+   * Overwrite the first sheet of an existing spreadsheet with new data,
+   * preserving cell value types (formulas, numbers, booleans, dates) via
+   * cell metadata tokens, then prune any extra sheets. Used to merge into a
+   * referenced spreadsheet so its instance reflects the merged result.
+   */
+  async function overwriteSpreadsheetWithTypedData(spreadsheetId, sheetData, context) {
+    const info = await getSpreadsheetInfo(spreadsheetId, context);
+
+    const gs = info.sheets[0];
+    if (!gs) throw new Error('Referenced spreadsheet has no sheets');
+    const sheetId = gs.properties.sheetId;
+    const data = sheetData?.data;
+    if (!data || data.length === 0) return;
+
+    const rowCount = data.length;
+    const colCount = Math.max(...data.map((r) => r.length), 1);
+    const currentRows = gs.properties.gridProperties?.rowCount || 1000;
+    const currentCols = gs.properties.gridProperties?.columnCount || 26;
+    const requests = [];
+
+    if (rowCount > currentRows || colCount > currentCols) {
+      requests.push({
+        updateSheetProperties: {
+          properties: {
+            sheetId,
+            gridProperties: {
+              rowCount: Math.max(rowCount, currentRows),
+              columnCount: Math.max(colCount, currentCols),
+            },
+          },
+          fields: 'gridProperties.rowCount,gridProperties.columnCount',
+        },
+      });
+    }
+
+    const blocks = buildTypedUpdateRows(data, sheetData?.cellMeta || null);
+    for (const block of blocks) {
+      requests.push({
+        updateCells: {
+          rows: block.rows,
+          fields: 'userEnteredValue',
+          range: {
+            sheetId,
+            startRowIndex: block.startRow,
+            endRowIndex: block.endRow,
+            startColumnIndex: block.startColumn,
+            endColumnIndex: Math.max(block.endColumn, colCount),
+          },
+        },
+      });
+    }
+
+    // Clear any leftover rows beyond the new data
+    if (currentRows > rowCount) {
+      requests.push({
+        updateCells: {
+          rows: Array.from({ length: currentRows - rowCount }, () => ({
+            values: Array.from({ length: colCount }, () => ({
+              userEnteredValue: { stringValue: '' },
+            })),
+          })),
+          fields: 'userEnteredValue',
+          range: {
+            sheetId,
+            startRowIndex: rowCount,
+            endRowIndex: currentRows,
+            startColumnIndex: 0,
+            endColumnIndex: colCount,
+          },
+        },
+      });
+    }
+
+    // Delete extra sheets beyond the first so the instance matches the merge
+    if (info.sheets.length > 1) {
+      for (const s of info.sheets.slice(1)) {
+        requests.push({ deleteSheet: { sheetId: s.properties.sheetId } });
+      }
+    }
+
+    await sendBatchUpdateRequests(spreadsheetId, requests, context);
+
+    if (context?.responseCache) {
+      context.responseCache.delete(`spreadsheet:${spreadsheetId}`);
+    }
+  }
+
+  /**
    * Apply standard post-upload formatting: auto-resize columns.
    * Does NOT change cell styles (preserves original formatting).
    */
@@ -1356,9 +1504,14 @@ const GoogleAPI = (() => {
   return {
     getToken,
     revokeToken,
+    getSpreadsheetInfo,
+    listAppFiles,
+    trashAppFile,
     uploadFileToDrive,
     cleanUploadedSheet,
     overwriteSheetValues,
+    overwriteSpreadsheetWithTypedData,
+    getSpreadsheetValues,
     formatUploadedSheet,
     createSpreadsheet,
     sheetJsToSheetsFormat,

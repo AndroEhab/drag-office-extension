@@ -1,4 +1,4 @@
-﻿const { loadModule } = require('./helpers');
+const { loadModule } = require('./helpers');
 
 const GoogleAPI = loadModule('../sidepanel/google-api.js', 'GoogleAPI');
 const Cleaner = loadModule('../sidepanel/cleaner.js', 'Cleaner');
@@ -990,6 +990,96 @@ describe('GoogleAPI', () => {
   // ================================================================
   //  uploadFileToDrive
   // ================================================================
+
+  describe('listAppFiles', () => {
+    test('lists spreadsheets the app created with name and creation date', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          files: [
+            { id: 'f1', name: 'Merged sheet', createdTime: '2026-07-01T10:00:00.000Z' },
+            { id: 'f2', name: 'Upload', createdTime: '2026-06-15T08:30:00.000Z' },
+          ],
+        }),
+      });
+
+      const files = await GoogleAPI.listAppFiles();
+
+      const calledUrl = global.fetch.mock.calls[0][0];
+      expect(calledUrl).toContain('https://www.googleapis.com/drive/v3/files?q=');
+      expect(calledUrl).toContain(
+        encodeURIComponent("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")
+      );
+      expect(files).toEqual([
+        {
+          id: 'f1',
+          name: 'Merged sheet',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T10:00:00.000Z',
+        },
+        {
+          id: 'f2',
+          name: 'Upload',
+          url: 'https://docs.google.com/spreadsheets/d/f2/edit',
+          addedAt: '2026-06-15T08:30:00.000Z',
+        },
+      ]);
+    });
+
+    test('paginates through all accessible files', async () => {
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValue({
+            files: [{ id: 'p1', name: 'One', createdTime: '2026-07-01T00:00:00.000Z' }],
+            nextPageToken: 'tok-2',
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValue({
+            files: [{ id: 'p2', name: 'Two', createdTime: '2026-07-02T00:00:00.000Z' }],
+          }),
+        });
+
+      const files = await GoogleAPI.listAppFiles();
+
+      expect(files.map((f) => f.id)).toEqual(['p1', 'p2']);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(global.fetch.mock.calls[1][0]).toContain('pageToken=tok-2');
+    });
+
+    test('throws a descriptive error when the Drive API denies access', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        json: jest.fn().mockResolvedValue({
+          error: { message: 'The caller does not have permission' },
+        }),
+      });
+
+      await expect(GoogleAPI.listAppFiles()).rejects.toThrow(
+        'Google API 403: The caller does not have permission'
+      );
+    });
+  });
+
+  describe('trashAppFile', () => {
+    test('moves a file to the trash via PATCH with the trashed flag in the body', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({ id: 'f1', trashed: true }),
+      });
+
+      await GoogleAPI.trashAppFile('f1');
+
+      const [url, opts] = global.fetch.mock.calls[0];
+      expect(url).toBe('https://www.googleapis.com/drive/v3/files/f1');
+      expect(opts.method).toBe('PATCH');
+      expect(JSON.parse(opts.body)).toEqual({ trashed: true });
+    });
+  });
 
   describe('uploadFileToDrive', () => {
     test('uploads file and returns id and url', async () => {

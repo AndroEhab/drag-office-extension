@@ -135,6 +135,20 @@ body {
   flex-shrink: 0;
 }
 
+/* The main view is wrapped in #app-view (the files view is its sibling).
+   Keep the same column rhythm the sections had as direct children:
+   inherit the app-content gap so responsive breakpoints keep working. */
+#app-view {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  min-height: 0;
+}
+
+#app-view > * {
+  flex-shrink: 0;
+}
+
 .app-footer {
   display: flex;
   flex: 0 0 auto;
@@ -530,7 +544,7 @@ body {
   border-radius: var(--radius-xs);
   letter-spacing: 0.02em;
   vertical-align: middle;
-  margin-left: 4px;
+  margin-right: 4px;
   line-height: 1.5;
 }
 
@@ -655,7 +669,7 @@ body {
 .url-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "input button" "hint hint";
+  grid-template-areas: "input button" "hint hint" "history history";
   gap: 6px;
 }
 
@@ -727,6 +741,246 @@ body {
   color: var(--color-error);
 }
 
+.docs-link-history {
+  grid-area: history;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.docs-link-history-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.03em;
+}
+
+.docs-link-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docs-link-history-btn {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.docs-link-history-btn:hover {
+  background: var(--color-accent-soft);
+}
+
+.docs-link-history-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.docs-link-history-host {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+
+/* ---- All-Files View ---- */
+
+.theme-toggle.active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.files-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.files-view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.files-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.files-subtitle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.files-search {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  box-shadow: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.files-search:focus {
+  border-color: var(--color-accent);
+  background: var(--color-surface);
+}
+
+/* The global input:focus-visible rule (bottom of this file) draws a 2px ring;
+   the search field keeps just its border, matching the other inputs. */
+.files-search:focus-visible {
+  outline: none;
+}
+
+.files-search::placeholder {
+  color: var(--color-text-muted);
+}
+
+.files-view-actions {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.files-view-actions-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* #files-clear id specificity beats the later .btn-text color/background. */
+#files-clear.files-clear-btn {
+  color: var(--color-error);
+}
+
+#files-clear.files-clear-btn:hover:not(:disabled) {
+  background: var(--color-error-bg);
+}
+
+#files-clear.files-clear-btn--armed,
+#files-clear.files-clear-btn--armed:hover:not(:disabled) {
+  background: var(--color-error);
+  color: #fff;
+}
+
+#files-clear.files-clear-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.files-status {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.files-status--error {
+  color: var(--color-error);
+}
+
+.files-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.files-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-item .files-item-link {
+  flex: 1;
+  min-width: 0;
+}
+
+.files-load-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.files-remove-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.files-item-link {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background var(--transition-fast);
+}
+
+.files-item-link:hover {
+  background: var(--color-bg-muted);
+}
+
+.files-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.files-item-date {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---- Options Panel ---- */
 
@@ -1033,12 +1287,28 @@ body {
 
 .custom-mapping-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 6px;
 }
 
-.custom-mapping-select {
+.custom-mapping-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   flex: 1;
+  min-width: 0;
+}
+
+.custom-mapping-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.custom-mapping-field .custom-mapping-select {
+  width: 100%;
 }
 
 .custom-mapping-arrow {
@@ -1917,7 +2187,7 @@ thead tr:last-child .row-num {
   .custom-mapping-row { flex-wrap: wrap; }
   .url-bar {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "input" "button" "hint";
+    grid-template-areas: "input" "button" "hint" "history";
   }
   .drop-zone { padding: 15px 10px; min-height: 96px; }
   .summary-card-value { font-size: 14px; }

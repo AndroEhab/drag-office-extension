@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Drag to Sheets",
-  "version": "1.0.1",
-  "version_name": "1.0.1",
+  "version": "1.0.3",
+  "version_name": "1.0.3",
   "description": "Drag spreadsheet files to open and clean them in Google Sheets",
-  "author": { "email": "support@dragtosheets.app" },
+  "author": { "email": "support@dragtosheets.com", "name": "Drag to Sheets" },
   "homepage_url": "https://www.dragtosheets.com/",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -14,11 +14,7 @@
   ],
   "host_permissions": [
     "https://sheets.googleapis.com/*",
-    "https://www.googleapis.com/*",
-    "https://accounts.google.com/*"
-  ],
-  "optional_host_permissions": [
-    "https://*/*"
+    "https://www.googleapis.com/*"
   ],
   "icons": {
     "16": "images/icon-16.png",
@@ -49,9 +45,8 @@
     }
   },
   "oauth2": {
-    "client_id": "1085463726022-ngt9nb7ln0jn7ju53psgtf2jo02hj00g.apps.googleusercontent.com",
+    "client_id": "1085463726022-liacdqopbe792mkhjvhtk5aqp69tad7v.apps.googleusercontent.com",
     "scopes": [
-      "https://www.googleapis.com/auth/spreadsheets",
       "https://www.googleapis.com/auth/drive.file"
     ]
   }
