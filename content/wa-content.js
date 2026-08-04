@@ -203,7 +203,20 @@
   function scanMessage(root) {
     if (root.getAttribute && root.getAttribute(DONE_MARK)) return;
     const names = findFileNamesInMessage(root);
-    if (names.length === 0) return;
+    if (names.length === 0) {
+      // Diagnostics: a file-like message (text contains "name.ext") that the
+      // supported-file matcher rejected — helps when WhatsApp changes its DOM.
+      const text = root.textContent || '';
+      if (/\.\w{2,5}\b/.test(text)) {
+        const docNodes = root.querySelectorAll(DOCUMENT_NODE_SELECTORS.join(',')).length;
+        console.info(
+          '[Drag to Sheets] file-like message not matched.',
+          'docNodes:', docNodes,
+          'text:', JSON.stringify(text.slice(0, 160))
+        );
+      }
+      return;
+    }
 
     root.setAttribute(DONE_MARK, 'true');
     const fileName = names[0];
@@ -228,7 +241,11 @@
     const pane = CHAT_PANE_SELECTORS.map((s) => document.querySelector(s)).find(Boolean);
     const target = pane || document.querySelector('#main') || document.body;
 
-    console.info('[Drag to Sheets] WhatsApp import active — observing', target === document.body ? 'body (fallback)' : 'chat pane');
+    console.info(
+      '[Drag to Sheets] WhatsApp import active — observing',
+      target === document.body ? 'body (fallback)' : 'chat pane',
+      '· message roots found:', target.querySelectorAll(MESSAGE_ROOT_SELECTORS.join(',')).length
+    );
     scanContainer(target);
 
     const observer = new MutationObserver((mutations) => {
