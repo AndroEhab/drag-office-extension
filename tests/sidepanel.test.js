@@ -3312,6 +3312,30 @@ describe('DragToSheetsApp', () => {
       expect(app.customMappingList.querySelectorAll('.custom-mapping-row').length).toBe(2);
     });
 
+    test('keeps the master file name and sheet name for the merged spreadsheet', async () => {
+      const app = await createApp();
+      document.querySelector('input[name="open-mode"][value="merge"]').checked = true;
+      app.files = [
+        {
+          name: 'sales.csv',
+          ext: 'csv',
+          parsed: { sheets: [{ name: 'Sales data', data: [['a'], ['1']] }] },
+        },
+        {
+          name: 'extra.csv',
+          ext: 'csv',
+          parsed: { sheets: [{ name: 'Extra', data: [['b'], ['2']] }] },
+        },
+      ];
+      GoogleAPI.createSpreadsheet.mockClear();
+
+      await app.handleUpload();
+
+      const [title, sheets] = GoogleAPI.createSpreadsheet.mock.calls[0];
+      expect(title).toBe('sales');
+      expect(sheets[0].name).toBe('Sales data');
+    });
+
     test('applies manual mappings during merge even when smart mapping is off', async () => {
       const app = await createApp();
       document.getElementById('opt-smart-mapping').checked = false;

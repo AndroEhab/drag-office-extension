@@ -4093,10 +4093,13 @@
           );
           this.showProgress(5);
 
-          // Merge mode
+          // Merge mode — the result keeps the master file's name (and its
+          // first sheet's name); it is never renamed to "Merged".
+          const masterItem = this.files[0];
+          const masterSheetName = this.getSelectedMergeSheet(masterItem)?.name || 'Sheet1';
           const title = masterRef
             ? masterRef.name
-            : `Merged — ${new Date().toLocaleDateString()}`;
+            : (masterItem.name.replace(/\.[^.]+$/, '') || masterItem.name);
 
           // Check which Excel files have raw data for formatting preservation
           const excelWithRaw = this.files.filter(
@@ -4188,7 +4191,7 @@
               this.setStatus(`Merging into ${masterRef.name}…`, 'loading');
               await GoogleAPI.overwriteSpreadsheetWithTypedData(
                 masterRef.refId,
-                { name: 'Merged', data: mergedData, cellMeta: mergedMeta },
+                { name: masterSheetName, data: mergedData, cellMeta: mergedMeta },
                 apiContext
               );
             } else {
@@ -4197,7 +4200,7 @@
             const result = masterRef
               ? { id: masterRef.refId, url: masterRef.refUrl, reference: true }
               : await GoogleAPI.createSpreadsheet(title, [{
-                name: 'Merged',
+                name: masterSheetName,
                 data: mergedData,
                 cellMeta: mergedMeta,
               }], apiContext);
@@ -4230,6 +4233,7 @@
             this.showProgress(15);
             const processed = await this.getProcessedData();
             const mergedSheets = processed[0].sheets;
+            if (mergedSheets[0]) mergedSheets[0].name = masterSheetName;
             this.showProgress(50);
             if (masterRef) {
               this.setStatus(`Merging into ${masterRef.name}…`, 'loading');
