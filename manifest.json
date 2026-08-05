@@ -32,6 +32,26 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content/wa-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content/wa-content.js"],
+      "css": ["content/wa-content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["images/icon-48.png"],
+      "matches": ["https://web.whatsapp.com/*"]
+    }
+  ],
   "side_panel": {
     "default_path": "sidepanel/sidepanel.html"
   },

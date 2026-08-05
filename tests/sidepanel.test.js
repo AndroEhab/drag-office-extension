@@ -4609,6 +4609,31 @@ describe('DragToSheetsApp', () => {
       expect(preview.sheets[0].data).toEqual([['a', 'b'], ['1', '2']]);
     });
 
+    test('history-loaded references render a separate-mode preview', async () => {
+      chrome.storage.local.get.mockResolvedValue({
+        prefs: { openMode: 'separate' },
+        docsLinkHistory: [
+          { url: 'https://docs.google.com/spreadsheets/d/abc123/edit', name: 'bom_mixed_values' },
+        ],
+      });
+      const app = await createApp();
+
+      app.docsLinkHistoryList.querySelector('button').click();
+      await flushPromises();
+      await flushPromises();
+      GoogleAPI.getSpreadsheetValues.mockClear();
+
+      await app.refreshPreview();
+
+      expect(app.files[0].kind).toBe('reference');
+      expect(app.previewPanel.classList.contains('hidden')).toBe(false);
+      expect(app.previewTable.textContent).not.toContain('Re-add bom_mixed_values');
+      expect(GoogleAPI.getSpreadsheetValues).toHaveBeenCalledWith(
+        'abc123',
+        expect.stringMatching(/^'Sheet1'!A1:/)
+      );
+    });
+
     test('preview shows informative error when a referenced sheet is inaccessible', async () => {
       const app = await createApp();
       app.files = [app.createReferenceEntry('x', 'https://docs.google.com/spreadsheets/d/x/edit', spreadsheetInfo)];
@@ -4685,6 +4710,42 @@ describe('DragToSheetsApp', () => {
       await Promise.resolve();
       expect(app.files).toHaveLength(1);
       expect(app.loadingText.textContent).toContain('already in your file list');
+    });
+
+    test('available-file references render a separate-mode preview', async () => {
+      const app = await createApp();
+      GoogleAPI.listAppFiles.mockResolvedValue([
+        {
+          id: 'f1',
+          name: 'bom_mixed_values',
+          url: 'https://docs.google.com/spreadsheets/d/f1/edit',
+          addedAt: '2026-07-01T10:00:00.000Z',
+        },
+      ]);
+      GoogleAPI.getSpreadsheetInfo.mockResolvedValue({
+        properties: { title: 'bom_mixed_values' },
+        sheets: [
+          { properties: { sheetId: 0, title: 'Sheet1', gridProperties: { rowCount: 2, columnCount: 2 } } },
+        ],
+      });
+
+      document.getElementById('files-btn').click();
+      await flushPromises();
+      await flushPromises();
+      app.filesList.querySelector('.files-load-btn').click();
+      await flushPromises();
+      await flushPromises();
+      GoogleAPI.getSpreadsheetValues.mockClear();
+
+      await app.refreshPreview();
+
+      expect(app.files[0].kind).toBe('reference');
+      expect(app.previewPanel.classList.contains('hidden')).toBe(false);
+      expect(app.previewTable.textContent).not.toContain('Re-add bom_mixed_values');
+      expect(GoogleAPI.getSpreadsheetValues).toHaveBeenCalledWith(
+        'f1',
+        expect.stringMatching(/^'Sheet1'!A1:/)
+      );
     });
 
     test('removes a file from the files view and drops its reference', async () => {
@@ -4986,6 +5047,102 @@ describe('DragToSheetsApp', () => {
 
       expect(app.filesStatus.textContent).toContain('Could not load your files');
       expect(app.filesStatus.classList.contains('files-status--error')).toBe(true);
+    });
+  });
+
+  describe('WhatsApp Web import', () => {
+    function getRuntimeListener() {
+      const calls = chrome.runtime.onMessage.addListener.mock.calls;
+      return calls[calls.length - 1][0];
+    }
+
+    test('announces panel readiness so stashed files can be flushed', async () => {
+      chrome.runtime.sendMessage.mockClear();
+      const app = await createApp();
+
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'wa:panel-ready' });
+      expect(app).toBeTruthy();
+    });
+
+    test('adds a file relayed from WhatsApp through the normal pipeline', async () => {
+      const app = await createApp();
+      Parser.parse.mockResolvedValue({
+        sheets: [{ name: 'wa', data: [['a', 'b'], ['1', '2']] }],
+      });
+      const listener = getRuntimeListener();
+      const bytes = new ArrayBuffer(7);
+      new Uint8Array(bytes).set(new TextEncoder().encode('a,b\n1,2'));
+
+      const bytesBase64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+      listener({ type: 'wa:file', name: 'wa.csv', bytesBase64, byteLength: 7 });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].name).toBe('wa.csv');
+    });
+
+    test('treats a repeated WhatsApp transfer as a duplicate file', async () => {
+      const app = await createApp();
+      Parser.parse.mockResolvedValue({
+        sheets: [{ name: 'wa', data: [['a', 'b'], ['1', '2']] }],
+      });
+      const listener = getRuntimeListener();
+      const bytesBase64 = btoa('a,b\n1,2');
+      const message = { type: 'wa:file', name: 'wa.csv', bytesBase64, byteLength: 7 };
+
+      listener(message);
+      listener(message);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(app.files).toHaveLength(1);
+      expect(app.loadingText.textContent).toBe('File already loaded');
+    });
+
+    test('parses WhatsApp workbooks eagerly instead of adding them on demand', async () => {
+      const app = await createApp();
+      Parser.parse.mockResolvedValue({
+        sheets: [
+          { name: 'First', data: [['A'], ['1']] },
+          { name: 'Second', data: [['B'], ['2']] },
+        ],
+      });
+      const listener = getRuntimeListener();
+      const message = {
+        type: 'wa:file',
+        name: 'workbook.xlsx',
+        bytesBase64: btoa('xlsx-bytes'),
+        byteLength: 10,
+      };
+
+      listener(message);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].lazy).not.toBe(true);
+      expect(app.files[0].parsed.sheets).toHaveLength(2);
+    });
+
+    test('ignores WhatsApp messages without file bytes', async () => {
+      const app = await createApp();
+      const listener = getRuntimeListener();
+
+      listener({ type: 'wa:file', name: 'empty.csv' });
+      listener({ type: 'other' });
+      await Promise.resolve();
+
+      expect(app.files).toHaveLength(0);
     });
   });
 

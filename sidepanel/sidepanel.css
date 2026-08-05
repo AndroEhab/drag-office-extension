@@ -1363,35 +1363,30 @@ body {
   gap: 6px;
   width: auto;
   min-width: 0;
-  height: 32px;
-  padding: 0 9px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  min-height: 28px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background var(--transition-standard), color var(--transition-standard), border-color var(--transition-standard);
+  transition: background var(--transition-fast), color var(--transition-fast);
   align-self: flex-start;
   font-family: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
-.btn-settings:hover {
-  background: var(--color-bg-subtle);
-  color: var(--color-text);
-  border-color: var(--color-border-strong);
-}
-
+.btn-settings:hover,
 .btn-settings:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-.btn-settings.active {
   background: var(--color-accent-soft);
   color: var(--color-accent);
-  border-color: var(--color-accent);
+}
+
+.btn-settings.active,
+.btn-settings[aria-expanded='true'] {
+  color: var(--color-accent);
 }
 
 .btn-settings-label {
@@ -1401,13 +1396,15 @@ body {
 .btn-settings-chevron {
   width: 13px;
   height: 13px;
-  margin-left: 2px;
+  flex-shrink: 0;
   color: currentColor;
   transition: transform var(--transition-standard);
+  stroke-width: 2.1;
 }
 
+/* Chevron points right when collapsed, down when the options are open. */
 .btn-settings[aria-expanded='true'] .btn-settings-chevron {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 
 .btn {
