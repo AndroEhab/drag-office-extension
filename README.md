@@ -15,7 +15,9 @@ Drag spreadsheet files into a side panel and open them in Google Sheets with bui
 - **Smart merge** — aligns columns by header name across files, with automatic matching of common header variants
 - **Custom column mapping** — manually map columns from source files to master headers
 - **Formatting preservation** — preserves common Excel cell formatting (fonts, fills, borders, alignment, number formats) where supported by Google Sheets
-- **URL import** — fetch spreadsheet files from a URL (per-origin HTTPS permission required, 50 MB limit)
+- **URL import** — import live references from Google Sheets links or fetch supported CSV, TSV, XLSX, and XLS files from direct HTTPS URLs (per-origin permission required, 50 MB limit)
+- **Custom workflows** â€” save a named master file, optional input files, worksheet choices, and cleaning/mapping settings for one-click runs
+- **Master file locking** â€” an explicitly assigned workflow master stays at the top of the list; other files can still be reordered below it
 - **Cleaning tools** before upload:
   - Trim whitespace
   - Remove empty rows and columns
@@ -35,6 +37,8 @@ Drag spreadsheet files into a side panel and open them in Google Sheets with bui
 - Drag spreadsheet files into the drop zone
 - Select cleaning options and open mode (separate or merge)
 - Click **Open in Sheets**
+
+For a repeatable merge, open **Custom workflows**, save the current setup, choose the master and any optional input files, then use **Run** later. Linked Google Sheets can be updated in place. Local files are available for one-click reuse only when they were selected through a persistent file handle; otherwise the workflow asks you to re-add them.
 
 ## Excel Support (.xlsx / .xls)
 

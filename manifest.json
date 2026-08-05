@@ -14,7 +14,11 @@
   ],
   "host_permissions": [
     "https://sheets.googleapis.com/*",
-    "https://www.googleapis.com/*"
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
   ],
   "icons": {
     "16": "images/icon-16.png",

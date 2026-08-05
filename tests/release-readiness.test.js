@@ -249,10 +249,7 @@ describe('release-readiness regression suite', () => {
         'https://www.googleapis.com/*',
         'https://accounts.google.com/*',
       ]));
-      // URL import no longer fetches arbitrary origins — the app only talks
-      // to the Google APIs declared in host_permissions, so no optional
-      // host permissions are declared.
-      expect(manifest.optional_host_permissions).toBeUndefined();
+      expect(manifest.optional_host_permissions).toEqual(['https://*/*']);
     });
 
     test('configures the toolbar action and keyboard shortcut', () => {
@@ -325,17 +322,37 @@ describe('release-readiness regression suite', () => {
       expect(global.fetch).toBeUndefined();
     });
 
-    test('rejects non-docs URLs without permission or network access', async () => {
+    test('rejects a generic URL when the response is not a supported file', async () => {
       const app = await createApp();
-      app.urlInput.value = 'http://example.com/data.csv';
-      global.fetch = jest.fn();
+      app.urlInput.value = 'https://example.com/data.csv';
+      let read = false;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: (name) => name.toLowerCase() === 'content-type' ? 'text/html' : null,
+        },
+        body: {
+          getReader: () => ({
+            read: jest.fn().mockImplementation(() => {
+              if (read) return Promise.resolve({ done: true, value: undefined });
+              read = true;
+              return Promise.resolve({
+                done: false,
+                value: new TextEncoder().encode('<html>not a spreadsheet</html>'),
+              });
+            }),
+            cancel: jest.fn().mockResolvedValue(undefined),
+          }),
+        },
+      });
 
       await app.importFromUrl();
 
-      expect(app.urlHint.textContent).toContain('Paste a Google Sheets link');
-      expect(chrome.permissions.contains).not.toHaveBeenCalled();
-      expect(chrome.permissions.request).not.toHaveBeenCalled();
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(app.loadingText.textContent).toContain('did not return a supported spreadsheet file');
+      expect(chrome.permissions.request).toHaveBeenCalledWith({
+        origins: ['https://example.com/*'],
+      });
+      expect(global.fetch).toHaveBeenCalled();
     });
 
     test('explains that files not created by the app cannot be accessed', async () => {

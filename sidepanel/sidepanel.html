@@ -13,6 +13,9 @@
         <button id="files-btn" class="theme-toggle" title="All your files" aria-label="Open all your files">
           <i data-lucide="folder-open" class="app-icon" aria-hidden="true"></i>
         </button>
+        <button id="workflows-btn" class="theme-toggle" title="Custom workflows" aria-label="Open custom workflows">
+          <i data-lucide="workflow" class="app-icon" aria-hidden="true"></i>
+        </button>
         <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
           <i data-lucide="moon" class="app-icon" aria-hidden="true"></i>
         </button>
@@ -34,7 +37,7 @@
       <div class="url-import">
         <button id="url-toggle" class="url-toggle" aria-expanded="false">
           <i data-lucide="link" class="app-icon app-icon--url" aria-hidden="true"></i>
-          Import from Google Docs
+          Import from URL
           <i data-lucide="chevron-right" class="app-icon url-toggle-chevron" aria-hidden="true"></i>
         </button>
         <div id="url-bar" class="url-bar hidden">
@@ -42,15 +45,15 @@
             id="url-input"
             type="url"
             class="url-input"
-            placeholder="https://docs.google.com/spreadsheets/d/…"
-            aria-label="Google Sheets link"
+            placeholder="https://example.com/data.csv"
+            aria-label="Google Sheets or spreadsheet file URL"
             spellcheck="false"
             autocomplete="off"
           />
           <button id="url-fetch-btn" class="url-fetch-btn">
             Import
           </button>
-          <p class="url-hint">Paste a link to a Google Sheet. The app can only access sheets it created itself (files uploaded through this extension) — other files can't be opened, previewed, or merged.</p>
+          <p class="url-hint">Paste or drag a Google Sheet link or a direct URL to a CSV, TSV, XLSX, or XLS file. Google Sheets links must point to files created through this extension.</p>
           <div id="docs-link-history" class="docs-link-history hidden">
             <span class="docs-link-history-title">Recent imports</span>
             <ul id="docs-link-history-list" class="docs-link-history-list"></ul>
@@ -235,6 +238,29 @@
           </div>
         </div>
         <ul id="files-list" class="files-list"></ul>
+      </section>
+
+      <section id="workflows-view" class="files-view workflows-view hidden">
+        <div class="files-view-header">
+          <button id="workflows-back-btn" class="btn-text files-back-btn" type="button" aria-label="Back to the main view">
+            <i data-lucide="arrow-left" class="app-icon" aria-hidden="true"></i>
+            Back
+          </button>
+          <h3 class="files-title">Custom workflows</h3>
+        </div>
+        <p class="files-subtitle">Save a master file, optional input files, and processing choices for one-click merge or update runs.</p>
+        <button id="workflow-new-btn" class="btn btn-primary btn-sm" type="button">Save current setup</button>
+        <div id="workflow-form" class="workflow-form hidden">
+          <label class="workflow-name-label" for="workflow-name">Workflow name</label>
+          <input id="workflow-name" class="workflow-name-input" type="text" maxlength="80" placeholder="e.g. Weekly customer merge" autocomplete="off">
+          <p id="workflow-selection-hint" class="workflow-selection-hint">Choose the files this workflow should load. The master is always included and stays first.</p>
+          <div id="workflow-file-selection" class="workflow-file-selection"></div>
+          <div class="workflow-form-actions">
+            <button id="workflow-save-btn" class="btn btn-primary btn-sm" type="button">Save workflow</button>
+            <button id="workflow-cancel-btn" class="btn-text" type="button">Cancel</button>
+          </div>
+        </div>
+        <ul id="workflow-list" class="workflow-list"></ul>
       </section>
     </main>
 

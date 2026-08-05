@@ -20,6 +20,7 @@
     tabYieldEvery: 5,
     tabYieldMs: 75,
   };
+  const MAX_IMPORT_SIZE_BYTES = 50 * 1024 * 1024;
   const PREVIEW_SAMPLE_ROWS = 51;
   const EXCEL_METADATA_PREVIEW_NOTICE =
     'Excel metadata-sensitive transformations (Trim, Fix numbers, and Normalize headers) are not represented in this sample because trustworthy cell metadata is unavailable; they will be applied on upload.';
@@ -58,6 +59,9 @@
       this.mergeSheetMetadataLoading = false;
       this.mergeSheetMetadataPromise = null;
       this.docsLinkHistory = [];
+      this.workflows = [];
+      this.activeWorkflowId = null;
+      this.workflowFormIndexes = [];
       this._filesListData = [];
       this.whatsappIngestQueue = Promise.resolve();
       this.init();
@@ -232,6 +236,7 @@
         contentFingerprint,
         fileHandle: fileHandle || null,
         handleId: null,
+        isMaster: false,
         selectedMergeSheetIndex: 0,
         sheetMetadata: null,
       };
@@ -249,6 +254,7 @@
         lazy: true,
         fileHandle: fileHandle || null,
         handleId: null,
+        isMaster: false,
         selectedMergeSheetIndex: 0,
         sheetMetadata: null,
       };
@@ -1344,6 +1350,7 @@
       this.uploadBtn = document.getElementById('upload-btn');
       this.themeToggle = document.getElementById('theme-toggle');
       this.filesBtn = document.getElementById('files-btn');
+      this.workflowsBtn = document.getElementById('workflows-btn');
       this.appView = document.getElementById('app-view');
       this.filesView = document.getElementById('files-view');
       this.filesBackBtn = document.getElementById('files-back-btn');
@@ -1369,6 +1376,16 @@
       this.docsLinkHistoryList = document.getElementById('docs-link-history-list');
       this.filesClearBtn = document.getElementById('files-clear');
       this.filesSearch = document.getElementById('files-search');
+      this.workflowsView = document.getElementById('workflows-view');
+      this.workflowsBackBtn = document.getElementById('workflows-back-btn');
+      this.workflowNewBtn = document.getElementById('workflow-new-btn');
+      this.workflowForm = document.getElementById('workflow-form');
+      this.workflowName = document.getElementById('workflow-name');
+      this.workflowSelectionHint = document.getElementById('workflow-selection-hint');
+      this.workflowFileSelection = document.getElementById('workflow-file-selection');
+      this.workflowSaveBtn = document.getElementById('workflow-save-btn');
+      this.workflowCancelBtn = document.getElementById('workflow-cancel-btn');
+      this.workflowList = document.getElementById('workflow-list');
       this.smartMappingOption = document.getElementById('smart-mapping-option');
       this.smartMappingCheckbox = document.getElementById('opt-smart-mapping');
       this.mappingReview = document.getElementById('mapping-review');
@@ -1500,8 +1517,14 @@
       if (this.filesBtn) {
         this.filesBtn.addEventListener('click', () => this.toggleFilesView());
       }
+      if (this.workflowsBtn) {
+        this.workflowsBtn.addEventListener('click', () => this.toggleWorkflowsView());
+      }
       if (this.filesBackBtn) {
         this.filesBackBtn.addEventListener('click', () => this.closeFilesView());
+      }
+      if (this.workflowsBackBtn) {
+        this.workflowsBackBtn.addEventListener('click', () => this.closeWorkflowsView());
       }
       if (this.filesRefreshBtn) {
         this.filesRefreshBtn.addEventListener('click', () => this.loadFilesList());
@@ -1511,6 +1534,21 @@
       }
       if (this.filesSearch) {
         this.filesSearch.addEventListener('input', () => this.renderFilesList());
+      }
+      if (this.workflowNewBtn) {
+        this.workflowNewBtn.addEventListener('click', () => this.openWorkflowForm());
+      }
+      if (this.workflowSaveBtn) {
+        this.workflowSaveBtn.addEventListener('click', () => this.saveCurrentWorkflow());
+      }
+      if (this.workflowCancelBtn) {
+        this.workflowCancelBtn.addEventListener('click', () => this.closeWorkflowForm());
+      }
+      if (this.workflowName) {
+        this.workflowName.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') this.saveCurrentWorkflow();
+          if (event.key === 'Escape') this.closeWorkflowForm();
+        });
       }
 
       // Settings button toggles cleaning options
@@ -1607,6 +1645,23 @@
       this.urlInput.addEventListener('input', () => {
         this.urlInput.classList.remove('url-input--error');
       });
+      this.urlInput.addEventListener('dragover', (e) => {
+        if (!this.canAcceptUrlDrop(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        this.urlInput.classList.add('url-input--dragover');
+      });
+      this.urlInput.addEventListener('dragleave', () => {
+        this.urlInput.classList.remove('url-input--dragover');
+      });
+      this.urlInput.addEventListener('drop', (e) => {
+        e.preventDefault();
+        this.urlInput.classList.remove('url-input--dragover');
+        const droppedUrl = this.extractDroppedUrl(e.dataTransfer);
+        if (!droppedUrl) return;
+        this.urlInput.value = droppedUrl;
+        this.urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
     }
 
     checkExcelSupport() {
@@ -1619,6 +1674,52 @@
 
     // ---- URL Import ----
 
+    canAcceptUrlDrop(dataTransfer) {
+      const types = Array.from(dataTransfer?.types || []);
+      return types.includes('text/uri-list') ||
+        types.includes('text/plain') ||
+        types.includes('text/html');
+    }
+
+    extractDroppedUrl(dataTransfer) {
+      if (!dataTransfer || typeof dataTransfer.getData !== 'function') return null;
+
+      const values = [];
+      const uriList = dataTransfer.getData('text/uri-list') || '';
+      values.push(...uriList.split(/\r?\n/).filter((line) => !line.trim().startsWith('#')));
+
+      const html = dataTransfer.getData('text/html') || '';
+      if (html && typeof DOMParser !== 'undefined') {
+        const documentFragment = new DOMParser().parseFromString(html, 'text/html');
+        const href = documentFragment.querySelector('a[href]')?.href;
+        if (href) values.push(href);
+      }
+
+      values.push(dataTransfer.getData('text/plain') || '');
+
+      for (const value of values) {
+        const text = String(value).trim();
+        if (!text) continue;
+
+        const candidates = [text];
+        const embeddedUrl = text.match(/https?:\/\/[^\s<>"']+/i)?.[0];
+        if (embeddedUrl) candidates.push(embeddedUrl.replace(/[),.;]+$/, ''));
+
+        for (const candidate of candidates) {
+          try {
+            const url = new URL(candidate);
+            if (url.protocol === 'http:' || url.protocol === 'https:') {
+              return url.toString();
+            }
+          } catch (_) {
+            // Try the next drag-data representation.
+          }
+        }
+      }
+
+      return null;
+    }
+
     async toggleUrlBar(forceOpen) {
       const isCurrentlyOpen = this.urlToggle.getAttribute('aria-expanded') === 'true';
       const open = forceOpen !== undefined ? forceOpen : !isCurrentlyOpen;
@@ -1627,6 +1728,8 @@
       this.urlToggle.setAttribute('aria-expanded', String(open));
       if (open) {
         this.urlInput.focus();
+      } else {
+        this.currentFetchController?.abort();
       }
     }
 
@@ -1648,33 +1751,334 @@
       const raw = this.urlInput.value.trim();
 
       const parsed = this.parseDocsLink(raw);
-      if (!parsed) {
-        this.urlInput.classList.add('url-input--error');
-        this.showUrlTooltip('Paste a Google Sheets link, e.g. https://docs.google.com/spreadsheets/d/…');
+      if (parsed) {
+        const refKey = `ref:${parsed.id}`;
+        if (this.fileIdentityKeys.has(refKey)) {
+          this.urlInput.classList.add('url-input--error');
+          this.showUrlTooltip('This Google Sheet is already in your list');
+          return;
+        }
+
+        this.urlFetchBtn.disabled = true;
+        this.setStatus('Checking Google Sheet access…', 'loading');
+
+        try {
+          const entry = await this.addReferenceEntry(parsed.id, parsed.url);
+          this.setStatus(`Added "${entry.name}" — linked to your Google Sheet`, 'success');
+          this.urlInput.value = '';
+          this.toggleUrlBar(false);
+        } catch (err) {
+          this.urlInput.classList.add('url-input--error');
+          this.setStatus(this.referenceAccessErrorMessage(err), 'error');
+        } finally {
+          this.urlFetchBtn.disabled = false;
+        }
         return;
       }
 
-      const refKey = `ref:${parsed.id}`;
-      if (this.fileIdentityKeys.has(refKey)) {
+      const url = this.parseFileUrl(raw);
+      if (!url) {
         this.urlInput.classList.add('url-input--error');
-        this.showUrlTooltip('This Google Sheet is already in your list');
+        this.showUrlTooltip(
+          'Paste a Google Sheets link or a direct HTTPS URL to a CSV, TSV, XLSX, or XLS file'
+        );
+        return;
+      }
+
+      // Google Docs and Drive URLs that are not spreadsheet references should
+      // not fall through to a download request for an HTML page.
+      if (this.isGoogleDocsHost(url)) {
+        this.urlInput.classList.add('url-input--error');
+        this.showUrlTooltip(
+          'Paste a Google Sheets link or a direct HTTPS URL to a CSV, TSV, XLSX, or XLS file'
+        );
+        return;
+      }
+
+      const originPattern = `${url.protocol}//${url.hostname}/*`;
+      let granted;
+      try {
+        // Request immediately from the click/Enter handler. Waiting for a
+        // separate permissions.contains() call first can consume the user
+        // activation Chrome requires before showing an origin prompt.
+        granted = await chrome.permissions.request({ origins: [originPattern] });
+      } catch {
+        granted = false;
+      }
+
+      if (!granted) {
+        this.urlInput.classList.add('url-input--error');
+        this.setStatus(`Permission denied for ${url.hostname}. Cannot fetch from this origin.`, 'warning');
         return;
       }
 
       this.urlFetchBtn.disabled = true;
-      this.setStatus('Checking Google Sheet access…', 'loading');
+      this.setStatus(`Fetching ${url.hostname}…`, 'loading');
+
+      const controller = new AbortController();
+      this.currentFetchController = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       try {
-        const entry = await this.addReferenceEntry(parsed.id, parsed.url);
-        this.setStatus(`Added "${entry.name}" — linked to your Google Sheet`, 'success');
+        const response = await fetch(url.toString(), {
+          signal: controller.signal,
+          // A redirected cross-origin download can trigger a browser-level
+          // CORS error before the app can handle the response. Direct URLs
+          // remain supported; redirected URLs receive a graceful app error.
+          redirect: 'manual',
+        });
+
+        if (response.type === 'opaqueredirect') {
+          const redirectError = new Error('The URL redirects to another host.');
+          redirectError.code = 'URL_REDIRECT';
+          throw redirectError;
+        }
+
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status} ${response.statusText}`);
+        }
+
+        const contentLength = response.headers.get('content-length');
+        if (contentLength !== null) {
+          const declaredSize = parseInt(contentLength, 10);
+          if (!Number.isNaN(declaredSize) && declaredSize > MAX_IMPORT_SIZE_BYTES) {
+            controller.abort();
+            response.body?.cancel?.().catch?.(() => {});
+            throw new Error(
+              `File too large (${this.formatBytes(declaredSize)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
+            );
+          }
+        }
+
+        const chunks = await this.readUrlResponseChunks(response);
+        const disposition = response.headers.get('content-disposition') || '';
+        const contentType = response.headers.get('content-type') || '';
+        const fileName = this.resolveFileName(raw, disposition, contentType);
+
+        if (!this.isSupportedUrlResponse(fileName, contentType)) {
+          throw new Error(
+            'URL did not return a supported spreadsheet file. Supported formats: CSV, TSV, XLSX, and XLS.'
+          );
+        }
+
+        const ext = fileName.split('.').pop().toLowerCase();
+        if ((ext === 'xlsx' || ext === 'xls') && !Parser.isExcelSupported()) {
+          throw new Error('Excel support not installed. See README for setup.');
+        }
+
+        const blob = new Blob(chunks, { type: contentType || undefined });
+        const file = new File([blob], fileName, { type: blob.type });
+
+        await this.handleFiles([file], undefined, { forceEager: true });
         this.urlInput.value = '';
         this.toggleUrlBar(false);
       } catch (err) {
         this.urlInput.classList.add('url-input--error');
-        this.setStatus(this.referenceAccessErrorMessage(err), 'error');
+        this.setStatus(this.urlImportErrorMessage(err, url), 'error');
       } finally {
+        clearTimeout(timeoutId);
+        this.currentFetchController = null;
         this.urlFetchBtn.disabled = false;
       }
+    }
+
+    urlImportErrorMessage(err, url) {
+      if (err?.name === 'AbortError') {
+        return 'Import cancelled or timed out';
+      }
+
+      if (err?.code === 'URL_REDIRECT') {
+        return (
+          `This URL redirects to another download host, which cannot be imported directly. ` +
+          'Use the direct file URL, or download the file and import it locally.'
+        );
+      }
+
+      const detail = String(err?.message || '');
+      if (/Failed to fetch|NetworkError|Load failed|CORS/i.test(detail) || err?.name === 'TypeError') {
+        return (
+          `Could not fetch ${url.hostname}. The site may block browser access or redirect ` +
+          'to a different download host. Try a direct file URL, or download the file and import it locally.'
+        );
+      }
+
+      if (/Server returned (401|403)\b/i.test(detail)) {
+        return (
+          'The server denied access to this file. It may require an authenticated download link. ' +
+          'Try downloading it locally and importing the saved file.'
+        );
+      }
+
+      if (/Server returned 404\b/i.test(detail)) {
+        return 'The file could not be found at this URL. Check the link and try again.';
+      }
+
+      return `Import failed: ${detail || 'The server returned an unreadable response.'}`;
+    }
+
+    /**
+     * Read a URL response without allowing the body to exceed the import
+     * limit. Streaming keeps large responses bounded even when the server
+     * omits Content-Length.
+     */
+    async readUrlResponseChunks(response) {
+      if (!response.body || typeof response.body.getReader !== 'function') {
+        if (typeof response.arrayBuffer !== 'function') {
+          throw new Error('The server returned an unreadable response body.');
+        }
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength > MAX_IMPORT_SIZE_BYTES) {
+          throw new Error(
+            `File too large (${this.formatBytes(buffer.byteLength)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
+          );
+        }
+        return [buffer];
+      }
+
+      const reader = response.body.getReader();
+      const chunks = [];
+      let totalBytes = 0;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          totalBytes += value?.byteLength || 0;
+          if (totalBytes > MAX_IMPORT_SIZE_BYTES) {
+            throw new Error(
+              `File too large (${this.formatBytes(totalBytes)}). Maximum supported size is ${this.formatBytes(MAX_IMPORT_SIZE_BYTES)}.`
+            );
+          }
+          chunks.push(value);
+        }
+      } finally {
+        try {
+          await reader.cancel();
+        } catch (_) {
+          // The stream may already be closed after a completed read.
+        }
+      }
+
+      return chunks;
+    }
+
+    parseFileUrl(raw) {
+      let url;
+      try {
+        url = new URL(raw);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== 'https:' || !url.hostname) return null;
+      return url;
+    }
+
+    isGoogleDocsHost(url) {
+      const host = url?.hostname?.toLowerCase() || '';
+      return host === 'docs.google.com' || host.endsWith('.docs.google.com') ||
+        host === 'drive.google.com' || host.endsWith('.drive.google.com');
+    }
+
+    getContentTypeBase(contentType) {
+      return String(contentType || '').split(';', 1)[0].trim().toLowerCase();
+    }
+
+    getContentTypeExtension(contentType) {
+      const mime = this.getContentTypeBase(contentType);
+      const mimeMap = {
+        'text/csv': 'csv',
+        'application/csv': 'csv',
+        'text/tab-separated-values': 'tsv',
+        'text/tsv': 'tsv',
+        'application/tab-separated-values': 'tsv',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+        'application/vnd.ms-excel': 'xls',
+      };
+      return mimeMap[mime] || null;
+    }
+
+    isSupportedUrlResponse(fileName, contentType) {
+      const mime = this.getContentTypeBase(contentType);
+      const mimeExtension = this.getContentTypeExtension(contentType);
+      const supportedByName = Parser.isSupported(fileName);
+      const nameExtension = String(fileName || '').split('.').pop().toLowerCase();
+      const knownUnsupportedMimes = new Set([
+        'text/html',
+        'application/xhtml+xml',
+        'application/json',
+        'text/json',
+        'application/pdf',
+        'image/png',
+        'image/jpeg',
+        'image/gif',
+        'application/zip',
+      ]);
+      const permissiveMimes = new Set([
+        '',
+        'application/octet-stream',
+        'binary/octet-stream',
+        'text/plain',
+      ]);
+
+      if (knownUnsupportedMimes.has(mime)) return false;
+      if (mime && !mimeExtension && !permissiveMimes.has(mime)) return false;
+      if (!supportedByName && !mimeExtension) return false;
+      if (mimeExtension && supportedByName && nameExtension !== mimeExtension) return false;
+      return true;
+    }
+
+    /**
+     * Derive a safe local filename from response metadata. A direct download
+     * endpoint often has no useful extension in its URL, so a supported MIME
+     * type is used as a fallback. Unknown response types intentionally keep
+     * an unsupported name and are rejected by isSupportedUrlResponse().
+     */
+    resolveFileName(rawUrl, disposition, contentType) {
+      const decode = (value) => {
+        try {
+          return decodeURIComponent(value);
+        } catch (_) {
+          return value;
+        }
+      };
+      const basename = (value) => String(value || '')
+        .replace(/^["']|["']$/g, '')
+        .replace(/^.*[\\/]/, '')
+        .trim();
+
+      let candidate = '';
+      const encodedMatch = String(disposition || '').match(
+        /filename\*\s*=\s*(?:UTF-8''|utf-8'')?([^;\r\n]+)/i
+      );
+      const regularMatch = String(disposition || '').match(
+        /filename\s*=\s*([^;\r\n]+)/i
+      );
+      if (encodedMatch?.[1]) {
+        candidate = basename(decode(encodedMatch[1]));
+      } else if (regularMatch?.[1]) {
+        candidate = basename(decode(regularMatch[1]));
+      }
+
+      if (!candidate) {
+        try {
+          const pathname = new URL(rawUrl).pathname;
+          candidate = basename(decode(pathname.split('/').pop() || ''));
+        } catch (_) {
+          // Fall through to the MIME type.
+        }
+      }
+
+      if (candidate && Parser.isSupported(candidate)) return candidate;
+
+      const mimeExtension = this.getContentTypeExtension(contentType);
+      if (mimeExtension) {
+        const stem = candidate
+          ? candidate.replace(/\.[^.]*$/, '')
+          : 'import';
+        return `${stem || 'import'}.${mimeExtension}`;
+      }
+
+      return candidate || 'import';
     }
 
     /**
@@ -1716,6 +2120,7 @@
 
       this.fileIdentityKeys.add(refKey);
       this.files.push(entry);
+      this.ensureMasterAtFront();
       this.recordDocsLinkImport(entry);
       this.markFilesChanged();
       this.renderFileList();
@@ -1733,6 +2138,7 @@
         this.closeFilesView();
         return;
       }
+      this.closeWorkflowsView();
       this.filesView.classList.remove('hidden');
       if (this.appView) this.appView.classList.add('hidden');
       this.filesBtn.classList.add('active');
@@ -1746,6 +2152,377 @@
       this.filesBtn.classList.remove('active');
       if (this.filesSearch) this.filesSearch.value = '';
       this.resetFilesClearButton();
+    }
+
+    async toggleWorkflowsView() {
+      if (!this.workflowsView) return;
+      const isOpen = !this.workflowsView.classList.contains('hidden');
+      if (isOpen) {
+        this.closeWorkflowsView();
+        return;
+      }
+      this.closeFilesView();
+      this.workflowsView.classList.remove('hidden');
+      if (this.appView) this.appView.classList.add('hidden');
+      if (this.workflowsBtn) this.workflowsBtn.classList.add('active');
+      this.closeWorkflowForm();
+      this.renderWorkflowsList();
+    }
+
+    closeWorkflowsView() {
+      if (!this.workflowsView) return;
+      this.workflowsView.classList.add('hidden');
+      if (this.appView) this.appView.classList.remove('hidden');
+      if (this.workflowsBtn) this.workflowsBtn.classList.remove('active');
+      this.closeWorkflowForm();
+    }
+
+    workflowFileDescriptor(item) {
+      if (!item) return null;
+      if (item.kind === 'reference') {
+        return {
+          kind: 'reference',
+          refId: item.refId,
+          refUrl: item.refUrl,
+          name: item.name,
+          ext: item.ext,
+          size: 0,
+          stats: item.stats || null,
+          identityKey: item.identityKey || `ref:${item.refId}`,
+          selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
+          sheetMetadata: item.sheetMetadata || null,
+          isMaster: false,
+        };
+      }
+
+      // A local file must have a FileSystemFileHandle to be reopened after a
+      // panel/browser restart. The currently open File object alone is not a
+      // durable workflow reference.
+      if (!item.handleId) return null;
+      return {
+        kind: 'file',
+        name: item.name,
+        ext: item.ext,
+        size: this.getFileSize(item),
+        stats: item.stats || null,
+        identityKey: item.identityKey || null,
+        handleId: item.handleId,
+        selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
+        sheetMetadata: item.sheetMetadata || null,
+        isMaster: false,
+      };
+    }
+
+    openWorkflowForm() {
+      if (!this.workflowForm) return;
+      if (this.files.length === 0) {
+        this.setStatus('Add at least one file before saving a workflow', 'info');
+        return;
+      }
+
+      this.ensureMasterAtFront(true);
+      this.workflowName.value = '';
+      this.renderWorkflowFileSelection();
+      this.workflowForm.classList.remove('hidden');
+      if (this.workflowNewBtn) this.workflowNewBtn.disabled = true;
+      this.workflowName.focus();
+    }
+
+    closeWorkflowForm() {
+      if (this.workflowForm) this.workflowForm.classList.add('hidden');
+      if (this.workflowNewBtn) this.workflowNewBtn.disabled = false;
+      if (this.workflowName) this.workflowName.value = '';
+      if (this.workflowFileSelection) this.workflowFileSelection.innerHTML = '';
+      this.workflowFormIndexes = [];
+    }
+
+    renderWorkflowFileSelection() {
+      if (!this.workflowFileSelection) return;
+      this.workflowFileSelection.innerHTML = '';
+      this.workflowFormIndexes = this.files.map((_, index) => index);
+      const masterIndex = this.getMasterIndex();
+      const unavailable = [];
+
+      this.files.forEach((item, index) => {
+        const isMaster = index === masterIndex;
+        const descriptor = this.workflowFileDescriptor(item);
+        const available = Boolean(descriptor);
+        if (!available) unavailable.push(item.name);
+
+        const label = document.createElement('label');
+        label.className = `workflow-file-option${available ? '' : ' workflow-file-option--unavailable'}`;
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = isMaster || available;
+        checkbox.disabled = isMaster || !available;
+        checkbox.dataset.fileIndex = String(index);
+
+        const copy = document.createElement('span');
+        copy.className = 'workflow-file-option-copy';
+        const name = document.createElement('span');
+        name.className = 'workflow-file-option-name';
+        name.textContent = `${isMaster ? 'Master · ' : ''}${item.name}`;
+        const meta = document.createElement('span');
+        meta.className = 'workflow-file-option-meta';
+        meta.textContent = isMaster
+          ? (item.kind === 'reference' ? 'Updates this Google Sheet' : 'Creates a new sheet named after this file')
+          : available ? 'Optional input file' : 'Re-add or choose this file with a persistent file handle';
+        copy.appendChild(name);
+        copy.appendChild(meta);
+
+        label.appendChild(checkbox);
+        label.appendChild(copy);
+        this.workflowFileSelection.appendChild(label);
+      });
+
+      if (this.workflowSelectionHint) {
+        this.workflowSelectionHint.textContent = unavailable.length > 0
+          ? `The master is always included. ${unavailable.map((name) => `"${name}"`).join(', ')} cannot be saved for one-click reuse until a persistent file handle is available.`
+          : 'Choose the files this workflow should load. The master is always included and stays first.';
+      }
+    }
+
+    async saveCurrentWorkflow() {
+      if (!this.workflowName || !this.workflowFileSelection) return;
+      const name = this.workflowName.value.trim();
+      if (!name) {
+        this.workflowName.focus();
+        this.setStatus('Give the workflow a name first', 'warning');
+        return;
+      }
+
+      const masterIndex = this.getMasterIndex();
+      const selectedIndexes = Array.from(this.workflowFileSelection.querySelectorAll('input[type="checkbox"]'))
+        .filter((checkbox) => checkbox.checked)
+        .map((checkbox) => Number(checkbox.dataset.fileIndex))
+        .filter((index) => Number.isInteger(index));
+      if (!selectedIndexes.includes(masterIndex)) selectedIndexes.unshift(masterIndex);
+      selectedIndexes.sort((a, b) => a - b);
+      selectedIndexes.splice(selectedIndexes.indexOf(masterIndex), 1);
+      selectedIndexes.unshift(masterIndex);
+
+      const descriptors = selectedIndexes.map((index) => this.workflowFileDescriptor(this.files[index]));
+      if (descriptors.some((descriptor) => !descriptor)) {
+        this.setStatus('Every selected file needs a persistent file handle for one-click reuse', 'warning');
+        return;
+      }
+
+      const master = descriptors[0];
+      master.isMaster = true;
+      const workflow = {
+        id: `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        createdAt: new Date().toISOString(),
+        mode: 'merge',
+        files: descriptors,
+        masterIndex: 0,
+        cleaningOptions: this.getCleaningOptions(),
+        smartMapping: Boolean(this.isSmartMappingActive()),
+        customMappings: Array.isArray(this.customMappings) ? this.customMappings.map((mapping) => ({ ...mapping })) : [],
+      };
+
+      this.workflows = [workflow, ...this.workflows.filter((item) => item.name !== name)].slice(0, 30);
+      await this.saveWorkflows();
+      this.closeWorkflowForm();
+      this.renderWorkflowsList();
+      this.setStatus(`Saved workflow "${name}"`, 'success');
+    }
+
+    saveWorkflows() {
+      return chrome.storage.local
+        .set({ customWorkflows: this.workflows })
+        .catch((err) => this._log('warn', 'Drag to Sheets: workflow save failed:', err.message));
+    }
+
+    renderWorkflowsList() {
+      if (!this.workflowList) return;
+      this.workflowList.innerHTML = '';
+      if (!Array.isArray(this.workflows) || this.workflows.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'workflow-empty';
+        empty.textContent = 'No workflows saved yet.';
+        this.workflowList.appendChild(empty);
+        return;
+      }
+
+      for (const workflow of this.workflows) {
+        const files = Array.isArray(workflow.files) ? workflow.files : [];
+        const master = files[workflow.masterIndex || 0] || files[0];
+        const item = document.createElement('li');
+        item.className = 'workflow-item';
+
+        const copy = document.createElement('div');
+        copy.className = 'workflow-item-copy';
+        const title = document.createElement('span');
+        title.className = 'workflow-item-name';
+        title.textContent = workflow.name || 'Unnamed workflow';
+        const meta = document.createElement('span');
+        meta.className = 'workflow-item-meta';
+        meta.textContent = `${files.length} file${files.length === 1 ? '' : 's'} · Master: ${master?.name || 'Unknown'} · ${master?.kind === 'reference' ? 'updates master' : 'creates a new sheet'}`;
+        copy.appendChild(title);
+        copy.appendChild(meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'workflow-item-actions';
+        const runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'btn btn-primary btn-sm';
+        runBtn.textContent = 'Run';
+        runBtn.title = `Run ${workflow.name || 'workflow'}`;
+        runBtn.addEventListener('click', () => this.runWorkflow(workflow.id));
+        actions.appendChild(runBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'btn-text';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', () => this.deleteWorkflow(workflow.id));
+        actions.appendChild(deleteBtn);
+
+        item.appendChild(copy);
+        item.appendChild(actions);
+        this.workflowList.appendChild(item);
+      }
+    }
+
+    async deleteWorkflow(workflowId) {
+      const workflow = this.workflows.find((item) => item.id === workflowId);
+      if (!workflow) return;
+      if (typeof window.confirm === 'function' && !window.confirm(`Delete workflow "${workflow.name}"?`)) return;
+      this.workflows = this.workflows.filter((item) => item.id !== workflowId);
+      await this.saveWorkflows();
+      this.renderWorkflowsList();
+      this.setStatus(`Deleted workflow "${workflow.name}"`, 'info');
+    }
+
+    async resolveWorkflowFile(descriptor) {
+      if (!descriptor) return null;
+
+      const current = this.files.find((item) => descriptor.kind === 'reference'
+        ? item.kind === 'reference' && item.refId === descriptor.refId
+        : item.kind !== 'reference' && item.identityKey === descriptor.identityKey);
+      if (current) {
+        current.selectedMergeSheetIndex = this.getStoredMergeSheetIndex(descriptor);
+        return current;
+      }
+
+      if (descriptor.kind === 'reference') {
+        const info = {
+          properties: { title: descriptor.name },
+          sheets: (descriptor.sheetMetadata || []).map((sheet) => ({
+            properties: {
+              title: sheet.name,
+              gridProperties: { rowCount: sheet.rowCount, columnCount: sheet.colCount },
+            },
+          })),
+        };
+        const entry = this.createReferenceEntry(descriptor.refId, descriptor.refUrl, info);
+        entry.stats = descriptor.stats || null;
+        entry.selectedMergeSheetIndex = this.getStoredMergeSheetIndex(descriptor);
+        return entry;
+      }
+
+      if (!descriptor.handleId || typeof FileHandleStore === 'undefined') return null;
+      const handle = await FileHandleStore.getHandle(descriptor.handleId);
+      if (!handle || typeof handle.getFile !== 'function') return null;
+      const file = await handle.getFile();
+      if (!file || !Parser.isSupported(file.name)) return null;
+      const ext = descriptor.ext || file.name.split('.').pop().toLowerCase();
+      const parsed = await this.runProcessingTask(
+        'parse',
+        { file, options: { preserveFormatting: true } },
+        () => Parser.parse(file, { preserveFormatting: true })
+      );
+      const entry = this.createParsedFileEntry(file, ext, parsed, handle);
+      entry.handleId = descriptor.handleId;
+      entry.selectedMergeSheetIndex = this.getStoredMergeSheetIndex(descriptor);
+      return entry;
+    }
+
+    applyWorkflowSettings(workflow) {
+      const modeRadio = document.querySelector('input[name="open-mode"][value="merge"]');
+      if (modeRadio) modeRadio.checked = true;
+
+      const options = workflow.cleaningOptions || {};
+      const optMap = {
+        trim: 'opt-trim',
+        removeEmptyRows: 'opt-empty-rows',
+        removeEmptyColumns: 'opt-empty-cols',
+        removeDuplicates: 'opt-duplicates',
+        fixNumbers: 'opt-numbers',
+        normalizeDates: 'opt-dates',
+        normalizeHeaders: 'opt-headers',
+      };
+      for (const [key, id] of Object.entries(optMap)) {
+        const input = document.getElementById(id);
+        if (input) input.checked = Boolean(options[key]);
+      }
+      const duplicateMode = document.querySelector(`input[name="dup-mode"][value="${CSS.escape(options.duplicateMode || 'keep-first')}"]`);
+      if (duplicateMode) duplicateMode.checked = true;
+      document.getElementById('dup-mode')?.classList.toggle('hidden', !options.removeDuplicates);
+
+      if (this.smartMappingCheckbox) this.smartMappingCheckbox.checked = Boolean(workflow.smartMapping);
+      this.smartMappingApproved = Boolean(workflow.smartMapping);
+      this.smartMappingDeclined = false;
+      this.customMappings = Array.isArray(workflow.customMappings)
+        ? workflow.customMappings.map((mapping) => ({ ...mapping }))
+        : [];
+      this.invalidateProcessingCache();
+      this._updateOpenModeCards();
+    }
+
+    async loadWorkflow(workflow) {
+      const definitions = Array.isArray(workflow?.files) ? workflow.files.slice() : [];
+      if (definitions.length === 0) return { ok: false, missing: ['master file'] };
+      const masterIndex = Number.isInteger(workflow.masterIndex) ? workflow.masterIndex : 0;
+      const ordered = [definitions[masterIndex], ...definitions.filter((_, index) => index !== masterIndex)].filter(Boolean);
+      const resolved = [];
+      const missing = [];
+
+      for (const descriptor of ordered) {
+        try {
+          const entry = await this.resolveWorkflowFile(descriptor);
+          if (!entry) missing.push(descriptor.name || 'unnamed file');
+          else resolved.push(entry);
+        } catch (error) {
+          missing.push(`${descriptor.name || 'unnamed file'} (${error.message})`);
+        }
+      }
+      if (missing.length > 0) return { ok: false, missing };
+
+      resolved.forEach((item, index) => {
+        item.isMaster = index === 0;
+      });
+      this.files = resolved;
+      this.rebuildFingerprints();
+      this.ensureMasterAtFront();
+      this.applyWorkflowSettings(workflow);
+      this.activeWorkflowId = workflow.id;
+      this.markFilesChanged();
+      this.renderFileList();
+      this.updateUI();
+      this.saveSession();
+      return { ok: true };
+    }
+
+    async runWorkflow(workflowId) {
+      if (this.uploading) return;
+      const workflow = this.workflows.find((item) => item.id === workflowId);
+      if (!workflow) return;
+
+      this.setStatus(`Loading workflow "${workflow.name}"…`, 'loading');
+      try {
+        const loaded = await this.loadWorkflow(workflow);
+        if (!loaded.ok) {
+          this.setStatus(`Workflow needs these files re-added: ${loaded.missing.map((name) => `"${name}"`).join(', ')}`, 'warning');
+          return;
+        }
+        this.closeWorkflowsView();
+        await this.handleUpload({ workflowRun: true });
+      } catch (error) {
+        this.setStatus(`Workflow failed: ${error.message}`, 'error');
+      }
     }
 
     formatFileDate(iso) {
@@ -2091,6 +2868,7 @@
         parsed: null,
         fileHandle: null,
         handleId: null,
+        isMaster: false,
       };
     }
 
@@ -2240,6 +3018,7 @@
         contentFingerprint: item.contentFingerprint || null,
         lazy: Boolean(item.lazy && !item.parsed),
         handleId: item.handleId || null,
+        isMaster: Boolean(item.isMaster),
         selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
         sheetMetadata: item.sheetMetadata || null,
         sheets: item.parsed
@@ -2259,6 +3038,7 @@
         contentFingerprint: item.contentFingerprint || null,
         lazy: Boolean(item.lazy && !item.parsed),
         handleId: item.handleId || null,
+        isMaster: Boolean(item.isMaster),
         selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
         sheetMetadata: item.sheetMetadata || null,
         file: item.file || null,
@@ -2329,13 +3109,16 @@
     async restoreSession() {
       this._prunedDuringRestore = [];
       try {
-        const [{ files: storedFiles, sessionSummary }, { prefs, docsLinkHistory }] = await Promise.all([
+        const [{ files: storedFiles, sessionSummary }, { prefs, docsLinkHistory, customWorkflows }] = await Promise.all([
           chrome.storage.session.get(['files', 'sessionSummary']),
-          chrome.storage.local.get(['prefs', 'docsLinkHistory']),
+          chrome.storage.local.get(['prefs', 'docsLinkHistory', 'customWorkflows']),
         ]);
         this.sessionSummary = sessionSummary || null;
         this.docsLinkHistory = Array.isArray(docsLinkHistory)
           ? docsLinkHistory.slice(0, 3)
+          : [];
+        this.workflows = Array.isArray(customWorkflows)
+          ? customWorkflows.filter((workflow) => workflow && workflow.id && Array.isArray(workflow.files)).slice(0, 30)
           : [];
 
         let restoredFiles = storedFiles;
@@ -2361,6 +3144,7 @@
             contentFingerprint: item.contentFingerprint || null,
             lazy: Boolean(item.lazy && !item.sheets),
             handleId: item.handleId || null,
+            isMaster: Boolean(item.isMaster),
             selectedMergeSheetIndex: this.getStoredMergeSheetIndex(item),
             sheetMetadata: Array.isArray(item.sheetMetadata) ? item.sheetMetadata : null,
             fileHandle: null,
@@ -2448,6 +3232,7 @@
           }
 
           this.files = validEntries;
+          this.ensureMasterAtFront();
           this._prunedDuringRestore = prunedNames;
           this.rebuildFingerprints();
           this.markFilesChanged();
@@ -2594,10 +3379,8 @@
           added++;
         }
 
-        this.renderFileList();
-        this.updateUI();
-
         if (added > 0) {
+          this.ensureMasterAtFront();
           this.markFilesChanged();
           this.setStatus(
             `${this.files.length} file(s) ready — parsing will happen on demand`,
@@ -2607,6 +3390,9 @@
         } else if (skippedDuplicates > 0) {
           this.setStatus('File already loaded', 'info');
         }
+
+        this.renderFileList();
+        this.updateUI();
 
         this.logTiming('handle files (lazy separate)', parseStart, {
           dropped: dropped.length,
@@ -2690,6 +3476,9 @@
         this.setStatus(`Error: ${lastError.message}`, 'error');
       }
 
+      if (added > 0) {
+        this.ensureMasterAtFront();
+      }
       this.renderFileList();
       this.updateUI();
 
@@ -2746,9 +3535,63 @@
       }
     }
 
+    /**
+     * Return the explicitly assigned master, falling back to the first file
+     * for sessions created before master status was persisted.
+     */
+    getMasterIndex() {
+      const explicitIndex = this.files.findIndex((item) => item?.isMaster === true);
+      return explicitIndex >= 0 ? explicitIndex : (this.files.length > 0 ? 0 : -1);
+    }
+
+    getMasterFile() {
+      const index = this.getMasterIndex();
+      return index >= 0 ? this.files[index] : null;
+    }
+
+    /** Keep the master at the head of the list and normalize legacy entries. */
+    ensureMasterAtFront(assignIfMissing = false) {
+      if (this.files.length === 0) return false;
+
+      let masterIndex = this.files.findIndex((item) => item?.isMaster === true);
+      if (masterIndex < 0) {
+        if (!assignIfMissing) return false;
+        masterIndex = 0;
+        this.files[0].isMaster = true;
+      }
+      const [master] = this.files.splice(masterIndex, 1);
+      this.files.unshift(master);
+      this.files.forEach((item, index) => {
+        item.isMaster = index === 0;
+      });
+      return masterIndex !== 0;
+    }
+
+    setMasterFile(index) {
+      if (this.uploading || index < 0 || index >= this.files.length) return;
+      const [master] = this.files.splice(index, 1);
+      this.files.unshift(master);
+      this.files.forEach((item, itemIndex) => {
+        item.isMaster = itemIndex === 0;
+      });
+      this.markFilesChanged();
+      this.renderFileList();
+      void this.updateCustomMappingVisibility();
+      this.schedulePreviewRefresh();
+      this.saveFilesSession();
+      this.setStatus(`"${master.name}" is now the master file`, 'success');
+    }
+
     moveFile(index, direction) {
       const newIndex = index + direction;
       if (newIndex < 0 || newIndex >= this.files.length) return;
+      const masterIndex = this.files.findIndex((item) => item?.isMaster === true);
+      // The master is fixed at the head of the list. Other files may be
+      // reordered freely, but never across the master boundary.
+      if (masterIndex >= 0) {
+        if (index === masterIndex && direction > 0) return;
+        if (index !== masterIndex && newIndex <= masterIndex) return;
+      }
       const [item] = this.files.splice(index, 1);
       this.files.splice(newIndex, 0, item);
       this.markFilesChanged();
@@ -2763,6 +3606,7 @@
       const currentIdx = parseInt(this.previewSelect.value, 10);
       this.files.splice(index, 1);
       this.rebuildFingerprints();
+      this.ensureMasterAtFront();
       this.markFilesChanged();
       this.renderFileList();
       void this.updateCustomMappingVisibility();
@@ -2785,6 +3629,7 @@
       this.fileFingerprints.clear();
       this.fileIdentityKeys.clear();
       this.customMappings = [];
+      this.activeWorkflowId = null;
       this.markFilesChanged();
       this.renderFileList();
       this.updateUI();
@@ -2828,6 +3673,8 @@
     renderFileList() {
       this.fileList.innerHTML = '';
       const isMergeMode = this.getOpenMode() === 'merge';
+      const explicitMasterIndex = this.files.findIndex((item) => item?.isMaster === true);
+      const masterIndex = explicitMasterIndex >= 0 ? explicitMasterIndex : this.getMasterIndex();
 
       this.files.forEach((item, index) => {
         const li = document.createElement('li');
@@ -2847,7 +3694,7 @@
 
         const info = document.createElement('div');
         info.className = 'file-info';
-        const isMaster = index === 0 && this.files.length >= 2 && this.getOpenMode() === 'merge';
+        const isMaster = index === masterIndex && this.files.length >= 2 && (explicitMasterIndex >= 0 || isMergeMode);
         info.innerHTML = `
           <span class="file-icon">
             <i data-lucide="${this.fileIcon(item.ext)}" class="app-icon" aria-hidden="true"></i>
@@ -2910,20 +3757,32 @@
         actions.appendChild(openBtn);
 
         if (this.files.length > 1) {
+          const masterBtn = document.createElement('button');
+          masterBtn.className = 'file-action-btn master-file-btn';
+          masterBtn.innerHTML = this.iconMarkup('star');
+          masterBtn.title = isMaster ? 'Master file (fixed at the top)' : 'Set as master file';
+          masterBtn.setAttribute('aria-label', isMaster ? `${item.name} is the master file` : `Set ${item.name} as the master file`);
+          masterBtn.disabled = this.uploading || isMaster;
+          masterBtn.addEventListener('click', () => this.setMasterFile(index));
+          actions.appendChild(masterBtn);
+        }
+
+        if (this.files.length > 1) {
+          const masterIsLocked = explicitMasterIndex >= 0;
           const upBtn = document.createElement('button');
           upBtn.className = 'file-action-btn reorder-btn';
           upBtn.innerHTML = this.iconMarkup('arrow-up');
-          upBtn.title = 'Move up';
-          upBtn.setAttribute('aria-label', 'Move file up');
-          upBtn.disabled = index === 0;
+          upBtn.title = masterIsLocked && index <= masterIndex ? 'Master file stays at the top' : 'Move up';
+          upBtn.setAttribute('aria-label', masterIsLocked && index <= masterIndex ? 'Master file stays at the top' : 'Move file up');
+          upBtn.disabled = masterIsLocked ? index <= masterIndex : index === 0;
           upBtn.addEventListener('click', () => this.moveFile(index, -1));
 
           const downBtn = document.createElement('button');
           downBtn.className = 'file-action-btn reorder-btn';
           downBtn.innerHTML = this.iconMarkup('arrow-down');
-          downBtn.title = 'Move down';
-          downBtn.setAttribute('aria-label', 'Move file down');
-          downBtn.disabled = index === this.files.length - 1;
+          downBtn.title = masterIsLocked && index === masterIndex ? 'Master file stays at the top' : 'Move down';
+          downBtn.setAttribute('aria-label', masterIsLocked && index === masterIndex ? 'Master file stays at the top' : 'Move file down');
+          downBtn.disabled = index === this.files.length - 1 || (masterIsLocked && index === masterIndex);
           downBtn.addEventListener('click', () => this.moveFile(index, 1));
 
           actions.appendChild(upBtn);
@@ -3151,7 +4010,7 @@
       const options = this.getCleaningOptions();
       const mode = this.getOpenMode();
 
-      if (mode === 'merge' && this.files.length > 1) {
+      if (mode === 'merge' && (this.files.length > 1 || (this.files.length === 1 && this.files[0]?.kind === 'reference'))) {
         return [await this.getMergedProcessedData(options)];
       }
 
@@ -4145,7 +5004,7 @@
 
     // ---- Upload ----
 
-    async handleUpload() {
+    async handleUpload({ workflowRun = false } = {}) {
       if (this.files.length === 0 || this.uploading) return;
 
       const uploadStart = this.now();
@@ -4153,7 +5012,10 @@
       this.renderFileList();
 
       const mode = this.getOpenMode();
-      this.primaryActionOperation = mode === 'merge' && this.files.length > 1 ? 'merge' : 'open';
+      if (mode === 'merge') this.ensureMasterAtFront();
+      const masterItemForRun = this.getMasterFile();
+      const workflowMasterUpdate = workflowRun && mode === 'merge' && masterItemForRun?.kind === 'reference';
+      this.primaryActionOperation = mode === 'merge' && (this.files.length > 1 || workflowMasterUpdate) ? 'merge' : 'open';
       this._updatePrimaryAction();
 
       this.showProgress(0);
@@ -4168,8 +5030,8 @@
         const results = [];
         let releasedParsedEntries = false;
 
-        if (mode === 'merge' && this.files.length > 1) {
-          const masterRef = this.files[0]?.kind === 'reference' ? this.files[0] : null;
+        if (mode === 'merge' && (this.files.length > 1 || workflowMasterUpdate)) {
+          const masterRef = this.getMasterFile()?.kind === 'reference' ? this.getMasterFile() : null;
           await this.ensureReferenceDataForFiles(this.files);
           await this.ensureEntriesParsed(
             this.files.filter((item) => item?.kind !== 'reference'),
@@ -4180,7 +5042,7 @@
 
           // Merge mode — the result keeps the master file's name (and its
           // first sheet's name); it is never renamed to "Merged".
-          const masterItem = this.files[0];
+          const masterItem = this.getMasterFile();
           const masterSheetName = this.getSelectedMergeSheet(masterItem)?.name || 'Sheet1';
           const title = masterRef
             ? masterRef.name

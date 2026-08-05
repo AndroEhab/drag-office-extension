@@ -292,7 +292,7 @@ describe('DragToSheetsApp', () => {
     chrome.storage.local.get.mockResolvedValue({});
   });
 
-  // ---- resolveFileName ----
+  // ---- UI helpers ----
 
   describe('fileIcon', () => {
     let app;
@@ -4465,11 +4465,38 @@ describe('DragToSheetsApp', () => {
       await app.toggleUrlBar(); // closes
       expect(app.urlBar.classList.contains('hidden')).toBe(true);
     });
+
+    test('accepts a dragged link and fills the URL input without importing', async () => {
+      const app = await createApp();
+      const importSpy = jest.spyOn(app, 'importFromUrl');
+      const link = 'https://cdn.wsform.com/wp-content/uploads/2020/06/industry.csv';
+      const dataTransfer = {
+        types: ['text/uri-list', 'text/plain'],
+        dropEffect: 'none',
+        getData: jest.fn((type) => type === 'text/uri-list' ? link : ''),
+      };
+
+      const dragOver = new Event('dragover', { bubbles: true, cancelable: true });
+      Object.defineProperty(dragOver, 'dataTransfer', { value: dataTransfer });
+      app.urlInput.dispatchEvent(dragOver);
+
+      expect(dragOver.defaultPrevented).toBe(true);
+      expect(app.urlInput.classList.contains('url-input--dragover')).toBe(true);
+
+      const drop = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
+      app.urlInput.dispatchEvent(drop);
+
+      expect(drop.defaultPrevented).toBe(true);
+      expect(app.urlInput.value).toBe(link);
+      expect(app.urlInput.classList.contains('url-input--dragover')).toBe(false);
+      expect(importSpy).not.toHaveBeenCalled();
+    });
   });
 
   // ---- URL Import Permission Flow ----
 
-  describe('importFromUrl docs link references', () => {
+  describe('importFromUrl Google Docs references and direct files', () => {
     const spreadsheetInfo = {
       properties: { title: 'My Linked Sheet' },
       sheets: [
@@ -4477,9 +4504,53 @@ describe('DragToSheetsApp', () => {
       ],
     };
 
+    function makeUrlResponse({
+      chunks = [new TextEncoder().encode('a,b\n1,2')],
+      contentType = 'text/csv',
+      contentDisposition = '',
+      contentLength = null,
+      ok = true,
+    } = {}) {
+      let index = 0;
+      const reader = {
+        read: jest.fn().mockImplementation(() => {
+          if (index < chunks.length) {
+            return Promise.resolve({ done: false, value: chunks[index++] });
+          }
+          return Promise.resolve({ done: true, value: undefined });
+        }),
+        cancel: jest.fn().mockResolvedValue(undefined),
+      };
+
+      return {
+        ok,
+        status: ok ? 200 : 500,
+        statusText: ok ? 'OK' : 'Server Error',
+        headers: {
+          get: jest.fn((name) => {
+            switch (name.toLowerCase()) {
+              case 'content-length':
+                return contentLength === null ? null : String(contentLength);
+              case 'content-type':
+                return contentType;
+              case 'content-disposition':
+                return contentDisposition;
+              default:
+                return null;
+            }
+          }),
+        },
+        body: { getReader: () => reader },
+      };
+    }
+
     beforeEach(() => {
       GoogleAPI.getSpreadsheetInfo.mockResolvedValue(spreadsheetInfo);
       GoogleAPI.getSpreadsheetValues.mockResolvedValue({ values: [['a', 'b'], ['1', '2']] });
+    });
+
+    afterEach(() => {
+      delete global.fetch;
     });
 
     test('adds a reference entry for a valid Google Sheets link', async () => {
@@ -4512,16 +4583,94 @@ describe('DragToSheetsApp', () => {
       expect(app.files[0].refUrl).toBe('https://docs.google.com/spreadsheets/d/drv-987/edit');
     });
 
-    test('rejects non-docs URLs with an informative tooltip', async () => {
+    test('imports a supported file from a direct HTTPS URL', async () => {
       const app = await createApp();
       app.urlInput.value = 'https://example.com/data.csv';
+      Parser.parse.mockResolvedValue({
+        sheets: [{ name: 'data', data: [['a', 'b'], ['1', '2']] }],
+      });
+      global.fetch = jest.fn().mockResolvedValue(makeUrlResponse());
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].name).toBe('data.csv');
+      expect(chrome.permissions.request).toHaveBeenCalledWith({
+        origins: ['https://example.com/*'],
+      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://example.com/data.csv',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+      expect(GoogleAPI.getSpreadsheetInfo).not.toHaveBeenCalled();
+      expect(app.urlInput.value).toBe('');
+    });
+
+    test('uses response metadata for download URLs without a file extension', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/export?id=123';
+      Parser.parse.mockResolvedValue({
+        sheets: [{ name: 'export', data: [['a', 'b'], ['1', '2']] }],
+      });
+      global.fetch = jest.fn().mockResolvedValue(
+        makeUrlResponse({
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+      );
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(1);
+      expect(app.files[0].name).toBe('export.xlsx');
+    });
+
+    test('rejects a URL response that is not a supported spreadsheet file', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://example.com/download';
+      global.fetch = jest.fn().mockResolvedValue(
+        makeUrlResponse({
+          chunks: [new TextEncoder().encode('<html>not a spreadsheet</html>')],
+          contentType: 'text/html',
+        })
+      );
 
       await app.importFromUrl();
 
       expect(app.files).toHaveLength(0);
-      expect(GoogleAPI.getSpreadsheetInfo).not.toHaveBeenCalled();
-      expect(app.urlHint.textContent).toContain('Paste a Google Sheets link');
+      expect(Parser.parse).not.toHaveBeenCalled();
+      expect(app.loadingText.textContent).toContain('did not return a supported spreadsheet file');
       expect(app.urlInput.classList.contains('url-input--error')).toBe(true);
+      expect(app.urlInput.value).toBe('https://example.com/download');
+    });
+
+    test('explains when the browser blocks a URL fetch', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://intouch.freshdesk.com/helpdesk/attachments/123?download=true';
+      global.fetch = jest.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(0);
+      expect(app.loadingText.textContent).toContain('Could not fetch intouch.freshdesk.com');
+      expect(app.loadingText.textContent).toContain('redirect');
+      expect(app.loadingText.textContent).toContain('download the file');
+      expect(app.urlInput.value).toBe(
+        'https://intouch.freshdesk.com/helpdesk/attachments/123?download=true'
+      );
+      expect(app.urlFetchBtn.disabled).toBe(false);
+    });
+
+    test('handles redirected downloads without surfacing a browser CORS error', async () => {
+      const app = await createApp();
+      app.urlInput.value = 'https://intouch.freshdesk.com/helpdesk/attachments/123?download=true';
+      global.fetch = jest.fn().mockResolvedValue({ type: 'opaqueredirect' });
+
+      await app.importFromUrl();
+
+      expect(app.files).toHaveLength(0);
+      expect(app.loadingText.textContent).toContain('redirects to another download host');
+      expect(app.loadingText.textContent).toContain('download the file');
+      expect(app.urlFetchBtn.disabled).toBe(false);
     });
 
     test('rejects docs links that are not spreadsheets', async () => {

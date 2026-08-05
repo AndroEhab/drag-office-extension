@@ -1,6 +1,6 @@
 {
   "name": "drag-to-sheets",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "private": true,
   "description": "Chrome extension — drag spreadsheet files into Google Sheets",
   "scripts": {
