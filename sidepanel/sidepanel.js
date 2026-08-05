@@ -24,6 +24,15 @@
   const EXCEL_METADATA_PREVIEW_NOTICE =
     'Excel metadata-sensitive transformations (Trim, Fix numbers, and Normalize headers) are not represented in this sample because trustworthy cell metadata is unavailable; they will be applied on upload.';
 
+  function base64ToArrayBuffer(value) {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
   class DragToSheetsApp {
     constructor() {
       /** @type {Array<{ file: File, parsed: Object, name: string, ext: string }>} */
@@ -50,6 +59,7 @@
       this.mergeSheetMetadataPromise = null;
       this.docsLinkHistory = [];
       this._filesListData = [];
+      this.whatsappIngestQueue = Promise.resolve();
       this.init();
     }
 
@@ -1273,17 +1283,49 @@
      */
     ingestWhatsAppFile(message) {
       const name = String(message?.name || 'whatsapp-file');
-      const bytes = message?.bytes;
-      // Realm-independent check — the payload arrives structured-cloned.
+      let bytes = message?.bytes;
+      const bytesBase64 = message?.bytesBase64;
+
+      // Chrome runtime messages are JSON-serialized, so the production relay
+      // uses base64. Keep accepting an ArrayBuffer for older callers/tests.
       const isArrayBuffer =
         bytes instanceof ArrayBuffer ||
         Object.prototype.toString.call(bytes) === '[object ArrayBuffer]';
-      console.info('[Drag to Sheets] panel ingest:', name, bytes && bytes.byteLength, 'isArrayBuffer:', isArrayBuffer);
-      if (!isArrayBuffer || bytes.byteLength === 0) return;
+      if (!isArrayBuffer && typeof bytesBase64 === 'string' && bytesBase64) {
+        try {
+          bytes = base64ToArrayBuffer(bytesBase64);
+        } catch (_) {
+          bytes = null;
+        }
+      }
+
+      const hasBytes = bytes && (
+        bytes instanceof ArrayBuffer ||
+        Object.prototype.toString.call(bytes) === '[object ArrayBuffer]'
+      );
+      console.info(
+        '[Drag to Sheets] panel ingest:',
+        name,
+        hasBytes ? bytes.byteLength : message?.byteLength,
+        'encoding:', typeof bytesBase64 === 'string' ? 'base64' : 'arraybuffer'
+      );
+      if (!hasBytes || bytes.byteLength === 0) return;
 
       const file = new File([bytes], name, { type: 'application/octet-stream' });
       this.setStatus(`Adding "${name}" from WhatsApp…`, 'loading');
-      void this.handleFiles([file]);
+      // WhatsApp messages can arrive twice while the panel is opening. Queue
+      // them so the first parse registers its fingerprint before the next
+      // delivery is checked for duplication. Keep this path eager so a small
+      // workbook is not shown as "Ready on demand" before worksheet metadata
+      // is available in Merge mode.
+      return this.handleFiles([file], undefined, { forceEager: true });
+    }
+
+    enqueueWhatsAppFile(message) {
+      this.whatsappIngestQueue = this.whatsappIngestQueue
+        .catch(() => {})
+        .then(() => this.ingestWhatsAppFile(message));
+      return this.whatsappIngestQueue;
     }
 
     bindElements() {
@@ -1551,7 +1593,7 @@
       // Files captured from WhatsApp Web (relayed by the background worker)
       chrome.runtime.onMessage.addListener((message) => {
         if (message && message.type === 'wa:file') {
-          this.ingestWhatsAppFile(message);
+          void this.enqueueWhatsAppFile(message);
         }
       });
 
@@ -2499,7 +2541,7 @@
 
     // ---- File Handling ----
 
-    async handleFiles(fileList, fileHandleMap) {
+    async handleFiles(fileList, fileHandleMap, { forceEager = false } = {}) {
       const parseStart = this.now();
       const dropped = Array.from(fileList);
       const options = this.getCleaningOptions();
@@ -2532,7 +2574,7 @@
       }
 
       const incomingHints = this.getIncomingWorkloadHints(acceptedFiles, options);
-      const useLazySeparate = this.shouldLazyLoadSeparateFiles(incomingHints);
+      const useLazySeparate = !forceEager && this.shouldLazyLoadSeparateFiles(incomingHints);
 
       if (useLazySeparate) {
         let added = 0;
@@ -3352,7 +3394,11 @@
           });
           return;
         }
-        if (useSamplePreview) {
+        // Google Sheets references have no local File object. They must use
+        // the bounded remote preview path even for a small separate-mode
+        // workload; sending them through ensureParsedEntry() produces the
+        // misleading "Re-add ..." message.
+        if (useSamplePreview || item.kind === 'reference') {
           try {
             const samplePreview = await this.getResponsiveSeparatePreview(item);
             if (!this.isPreviewTaskCurrent(previewTaskId)) return;

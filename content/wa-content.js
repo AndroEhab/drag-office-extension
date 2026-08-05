@@ -2,7 +2,7 @@
  * WhatsApp Web import — isolated-world content script.
  *
  * Watches the active chat for messages containing spreadsheet files
- * (csv / tsv / xlsx / xls) and renders an "Add to Sheets" button next to
+ * (csv / tsv / xlsx / xls) and renders a compact Drag to Sheets button next to
  * them. Clicking the button arms the MAIN-world hooks, triggers WhatsApp's
  * own download control, captures the resulting blob, and sends the file
  * bytes to the extension (background → side panel).
@@ -16,9 +16,10 @@
   'use strict';
 
   const EXTENSIONS = ['csv', 'tsv', 'xlsx', 'xls'];
-  const MAX_FILE_BYTES = 50 * 1024 * 1024;
+  // Chrome runtime messages are JSON-serialized. Base64 expands the payload
+  // by roughly one third, so leave room below Chrome's 64 MiB message limit.
+  const MAX_FILE_BYTES = 47 * 1024 * 1024;
   const BTN_CLASS = 'dts-wa-add-btn';
-  const DONE_MARK = 'data-dts-wa-added';
   const TAG = 'dts-wa';
   const CAPTURE_TIMEOUT_MS = 12000;
 
@@ -36,6 +37,15 @@
     'div.message-in',
     'div.message-out',
     '[role="row"]',
+  ];
+
+  const QUOTED_MESSAGE_SELECTORS = [
+    '[data-testid*="quoted" i]',
+    '[data-testid*="quote" i]',
+    '[aria-label*="quoted" i]',
+    '[class*="quoted" i]',
+    'blockquote',
+    '[role="blockquote"]',
   ];
 
   const DOCUMENT_NODE_SELECTORS = [
@@ -56,13 +66,73 @@
 
   const FILE_NAME_RE = /\.(?:csv|tsv|xlsx|xls)$/i;
 
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const parts = [];
+    const chunkSize = 0x6000; // avoid a huge String.fromCharCode call
+
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, offset + chunkSize);
+      let binary = '';
+      for (let i = 0; i < chunk.length; i++) {
+        binary += String.fromCharCode(chunk[i]);
+      }
+      parts.push(binary);
+    }
+
+    return btoa(parts.join(''));
+  }
+
   // ---- Blob capture registry (fed by the MAIN-world hooks) ----
 
   const capturedBlobs = new Map(); // blob: URL -> Blob
+  const activeImports = new WeakSet();
+  let contextRecoveryScheduled = false;
+
+  function isInvalidatedContextError(error) {
+    return /extension context invalidated/i.test(String(error?.message || error || ''));
+  }
+
+  /**
+   * A content script cannot reconnect after Chrome invalidates its extension
+   * context (usually when the extension is updated or reloaded). Refreshing
+   * WhatsApp is the only way to inject a live content script again. Do this
+   * automatically after the first failed runtime call instead of leaving the
+   * user with dead Add buttons and a cryptic console error.
+   */
+  function recoverInvalidatedContext(error) {
+    if (!isInvalidatedContextError(error)) return false;
+    if (contextRecoveryScheduled) return true;
+
+    contextRecoveryScheduled = true;
+    document.documentElement?.setAttribute('data-dts-wa-context-invalidated', 'true');
+    console.warn('[Drag to Sheets] WhatsApp connection expired; reloading to reconnect.');
+    setTimeout(() => {
+      try {
+        window.location.reload();
+      } catch (_) {
+        // The page may be closing or navigating already.
+      }
+    }, 250);
+    return true;
+  }
 
   const sendToMain = (kind) => {
     window.postMessage({ tag: TAG, dir: 'iso', kind }, '*');
   };
+
+  function requestSidePanel() {
+    try {
+      Promise.resolve(chrome.runtime.sendMessage({ type: 'wa:open-panel' }))
+        .catch((error) => {
+          // Opening the panel is best effort; the file import can continue.
+          recoverInvalidatedContext(error);
+        });
+    } catch (error) {
+      // Runtime unavailable in test/teardown contexts.
+      recoverInvalidatedContext(error);
+    }
+  }
 
   window.addEventListener('message', (event) => {
     if (event.source !== window && event.source !== null) return;
@@ -87,28 +157,45 @@
     return el.closest('div') || el;
   }
 
+  function isQuotedMessage(el) {
+    return QUOTED_MESSAGE_SELECTORS.some((selector) => el.closest(selector));
+  }
+
   function createAddButton(fileName, messageRoot) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = BTN_CLASS;
-    btn.textContent = 'Add to Sheets';
-    btn.title = `Add ${fileName} to Drag to Sheets`;
+    const idleLabel = `Add ${fileName} to Drag to Sheets`;
+    const logo = document.createElement('img');
+    logo.className = 'dts-wa-logo';
+    logo.alt = '';
+    logo.width = 20;
+    logo.height = 20;
+    logo.decoding = 'async';
+    logo.src = chrome.runtime.getURL('images/icon-48.png');
+    logo.addEventListener('error', () => {
+      // Keep the control usable if a browser refuses the extension resource.
+      logo.remove();
+      btn.classList.add('dts-wa-logo-missing');
+    }, { once: true });
+    btn.appendChild(logo);
+    btn.setAttribute('aria-label', idleLabel);
+    btn.title = idleLabel;
 
-    btn.addEventListener('click', () => {
-      btn.disabled = true;
-      btn.textContent = 'Adding…';
-      void importFile(fileName, messageRoot, btn);
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      requestSidePanel();
+      if (activeImports.has(btn)) return;
+      activeImports.add(btn);
+      void importFile(fileName, messageRoot)
+        .finally(() => activeImports.delete(btn));
     });
 
     return btn;
   }
 
-  async function importFile(fileName, messageRoot, btn) {
-    const reset = () => {
-      btn.disabled = false;
-      btn.textContent = 'Add to Sheets';
-    };
-
+  async function importFile(fileName, messageRoot) {
     try {
       // Arm the MAIN-world hooks, then trigger WhatsApp's own download.
       sendToMain('arm');
@@ -123,32 +210,30 @@
         mediaNode.click();
       }
 
-      const blob = await waitForCapturedBlob(btn);
+      const blob = await waitForCapturedBlob();
       if (!blob) {
-        btn.textContent = 'No download found';
-        setTimeout(reset, 2000);
+        console.warn('[Drag to Sheets] no spreadsheet download found:', fileName);
         return;
       }
 
       if (blob.size > MAX_FILE_BYTES) {
-        btn.textContent = 'File too large';
-        setTimeout(reset, 2000);
+        console.warn('[Drag to Sheets] spreadsheet is too large:', fileName, blob.size);
         return;
       }
 
       const bytes = await blob.arrayBuffer();
+      const bytesBase64 = arrayBufferToBase64(bytes);
       await chrome.runtime.sendMessage({
         type: 'wa:file',
         name: fileName,
-        bytes,
+        bytesBase64,
+        byteLength: bytes.byteLength,
       });
       console.info('[Drag to Sheets] sent file to extension:', fileName, bytes.byteLength);
-      btn.textContent = 'Added!';
-      setTimeout(() => btn.remove(), 1500);
     } catch (err) {
-      console.error('[Drag to Sheets] import failed:', err);
-      btn.textContent = 'Failed';
-      setTimeout(reset, 2000);
+      if (!recoverInvalidatedContext(err)) {
+        console.error('[Drag to Sheets] import failed:', err);
+      }
     }
   }
 
@@ -160,7 +245,7 @@
     return null;
   }
 
-  function waitForCapturedBlob(btn) {
+  function waitForCapturedBlob() {
     return new Promise((resolve) => {
       let settled = false;
 
@@ -205,15 +290,22 @@
   // ---- Scanning (anchored on the visible filename text) ----
 
   function attachToBubble(el, fileName) {
+    if (isQuotedMessage(el)) return;
     const bubble = findBubble(el);
-    if (!bubble || bubble.getAttribute && bubble.getAttribute(DONE_MARK)) return;
+    if (!bubble || bubble.querySelector(`.${BTN_CLASS}`)) return;
 
-    bubble.setAttribute(DONE_MARK, 'true');
     console.info('[Drag to Sheets] found spreadsheet file:', fileName);
 
     const btn = createAddButton(fileName, bubble);
-    const placement = bubble.querySelector('div.copyable-text, [data-pre-plain-text], div[role="row"]');
-    (placement || bubble).appendChild(btn);
+    const parent = el.parentElement;
+    if (parent && bubble.contains(parent)) {
+      // The broad copyable-text/row containers can span the whole viewport.
+      // Insert beside the filename's own element so the action stays with the
+      // attachment card instead of floating at the left edge of the chat.
+      parent.insertBefore(btn, el.nextSibling);
+    } else {
+      bubble.appendChild(btn);
+    }
   }
 
   function scanFileMessages(container) {
@@ -248,16 +340,28 @@
 
   function startObserver() {
     const pane = CHAT_PANE_SELECTORS.map((s) => document.querySelector(s)).find(Boolean);
-    const target = pane || document.querySelector('#main') || document.body;
+    // Observe the stable document body rather than #main/current chat pane.
+    // WhatsApp can replace both of those inner containers when navigating.
+    const target = document.body || document.documentElement;
 
     console.info(
       '[Drag to Sheets] WhatsApp import active — observing',
-      target === document.body ? 'body (fallback)' : 'chat pane'
+      pane ? 'stable body' : 'stable body (chat pane pending)'
     );
     scanFileMessages(target);
 
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
+        const removedButton = Array.from(mutation.removedNodes).some((node) =>
+          node.nodeType === Node.ELEMENT_NODE &&
+          (node.matches(`.${BTN_CLASS}`) || node.querySelector(`.${BTN_CLASS}`))
+        );
+        if (removedButton && mutation.target.nodeType === Node.ELEMENT_NODE) {
+          // WhatsApp can replace an entire attachment subtree. Rescan the
+          // surviving parent so the button is restored beside the filename.
+          scanFileMessages(mutation.target);
+        }
+
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
           scanFileMessages(node);
